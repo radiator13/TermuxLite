@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23"
+        android:protectionLevel="normal" />
+
+    <application
+        android:label="TermuxLite"
+        android:icon="@drawable/ic_launcher_foreground"
+        android:theme="@style/Theme.TermuxLite"
+        android:allowBackup="false">
+
+        <activity
+            android:name=".TermuxLiteActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Shizuku provider for rish access -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="moe.shizuku.manager.permission.MANAGER" />
+
+    </application>
+</manifest>
