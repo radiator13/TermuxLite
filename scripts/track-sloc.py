@@ -13,12 +13,14 @@ import re
 EXTENSIONS = {
     '.kt': 'Kotlin',
     '.java': 'Java',
+    '.rs': 'Rust',
     '.cpp': 'C/C++',
     '.hpp': 'C/C++',
     '.c': 'C/C++',
     '.h': 'C/C++',
     '.gradle': 'Gradle (Groovy/Kotlin)',
     '.cmake': 'CMake',
+    '.toml': 'TOML',
     '.xml': 'XML',
     '.py': 'Python',
     '.sh': 'Shell',
@@ -26,8 +28,8 @@ EXTENSIONS = {
     '.pro': 'Proguard',
 }
 
-IGNORE_DIRS = {'.git', '.gradle', 'build', 'dist', '.idea', 'gradle/wrapper'}
-IGNORE_FILES = {'gradlew', 'gradlew.bat', 'gradle-wrapper.jar'}
+IGNORE_DIRS = {'.git', '.gradle', 'build', 'dist', '.idea', 'gradle/wrapper', 'target', 'cargo_target'}
+IGNORE_FILES = {'gradlew', 'gradlew.bat', 'gradle-wrapper.jar', 'Cargo.lock'}
 
 def analyze_file(filepath, ext):
     try:
@@ -48,7 +50,7 @@ def analyze_file(filepath, ext):
             blank_lines += 1
             continue
 
-        if ext in ('.kt', '.java', '.cpp', '.hpp', '.c', '.h', '.gradle', '.pro'):
+        if ext in ('.kt', '.java', '.rs', '.cpp', '.hpp', '.c', '.h', '.gradle', '.pro'):
             if in_multiline:
                 comment_lines += 1
                 if '*/' in s:
@@ -93,7 +95,7 @@ def analyze_file(filepath, ext):
                 continue
             code_lines += 1
 
-        elif ext == '.properties':
+        elif ext in ('.properties', '.toml'):
             if s.startswith('#') or s.startswith('!'):
                 comment_lines += 1
                 continue

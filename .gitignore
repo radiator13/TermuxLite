@@ -19,3 +19,7 @@ terminal-view/
 .sigtmp/
 out/
 dist/
+target/
+cargo_target/
+**/target/
+**/cargo_target/
