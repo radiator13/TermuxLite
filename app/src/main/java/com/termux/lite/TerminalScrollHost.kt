@@ -49,20 +49,14 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        val wasAtBottom = terminal.topRow >= 0
-        if (wasAtBottom) {
+        if (terminal.topRow >= 0) {
             terminal.topRow = 0
-            post {
-                terminal.topRow = 0
-                terminal.invalidate()
-            }
         }
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-        val wasAtBottom = terminal.topRow >= 0
         super.onLayout(changed, left, top, right, bottom)
-        if (wasAtBottom && changed) {
+        if (changed && terminal.topRow >= 0) {
             terminal.topRow = 0
         }
     }

@@ -24,12 +24,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
@@ -458,10 +462,10 @@ class TermuxLiteActivity : ComponentActivity() {
         val tv = terminalView ?: return
         tv.requestFocus()
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        if (imm.isActive(tv)) {
+        if (isImeVisible()) {
             imm.hideSoftInputFromWindow(tv.windowToken, 0)
         } else {
-            imm.showSoftInput(tv, 0)
+            imm.showSoftInput(tv, InputMethodManager.SHOW_IMPLICIT)
         }
     }
 
@@ -576,7 +580,6 @@ fun TermuxLiteApp(
 ) {
     val theme = AppState.theme
     val sessions = AppState.sessions
-    val imeVisible = WindowInsets.isImeVisible
     val state = AppState.bootstrap
     val settingsOpen = AppState.settingsOpen
     val extraKeys = AppState.extraKeys
@@ -637,8 +640,14 @@ fun TermuxLiteApp(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .safeDrawingPadding()
-                    .imePadding()
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(
+                            WindowInsetsSides.Horizontal + WindowInsetsSides.Top
+                        )
+                    )
+                    .windowInsetsPadding(
+                        WindowInsets.navigationBars.union(WindowInsets.ime)
+                    )
             ) {
                 val currentTitle = sessions.firstOrNull { it.selected }?.title ?: "TermuxLite"
                 TopBar(
@@ -686,7 +695,7 @@ fun TermuxLiteApp(
                         )
                     }
                 }
-                if (extraKeys && !settingsOpen && imeVisible) {
+                if (extraKeys && !settingsOpen) {
                     ExtraKeysPad(
                         ctrl = AppState.ctrl,
                         alt = AppState.alt,

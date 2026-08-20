@@ -96,10 +96,12 @@ class TermuxLiteService : Service() {
         terminalView = tv
         val current = session
         if (current != null) {
-            current.updateTerminalSessionClient(SessionClient())
-            tv.attachSession(current)
-            TermThemes.apply(current, tv)
-            tv.onScreenUpdated()
+            if (tv.mTermSession !== current) {
+                current.updateTerminalSessionClient(SessionClient())
+                tv.attachSession(current)
+                TermThemes.apply(current, tv)
+                tv.onScreenUpdated()
+            }
         } else if (AppState.bootstrap is BootstrapState.Ready) {
             createSession()
         }
