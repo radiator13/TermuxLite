@@ -1,7 +1,6 @@
 package com.termux.lite
 
 import android.system.Os
-import android.util.Pair
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
@@ -292,7 +291,7 @@ class BootstrapInstaller(
             if (rel.contains("..") || rel.startsWith("/")) {
                 throw IOException("unsafe symlink dest: $rel")
             }
-            out.add(Pair.create(oldPath, File(paths.staging, rel).absolutePath))
+            out.add(Pair(oldPath, File(paths.staging, rel).absolutePath))
             line = reader.readLine()
         }
     }

@@ -28,17 +28,20 @@ jobs:
         with:
           targets: aarch64-linux-android
 
-      - name: Setup Cargo NDK
-        run: cargo install cargo-ndk
-
       - name: Rust Unit Tests
         run: |
           cargo test --manifest-path app/src/main/rust/Cargo.toml
 
       - name: Build Rust Native Library
         run: |
-          mkdir -p app/src/main/jniLibs
-          cargo ndk -t arm64-v8a -o app/src/main/jniLibs --manifest-path app/src/main/rust/Cargo.toml build --release
+          NDK_DIR=$(ls -d $ANDROID_SDK_ROOT/ndk/* | sort -V | tail -n 1)
+          TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CC_aarch64_linux_android="$TOOLCHAIN/aarch64-linux-android24-clang"
+          export AR_aarch64_linux_android="$TOOLCHAIN/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN/aarch64-linux-android24-clang"
+          cargo build --manifest-path app/src/main/rust/Cargo.toml --target aarch64-linux-android --release
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp app/src/main/rust/target/aarch64-linux-android/release/libtermuxlite_native.so app/src/main/jniLibs/arm64-v8a/
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6

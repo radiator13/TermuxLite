@@ -34,14 +34,14 @@ class BootstrapInstallerTest {
     fun symlinksParserHandlesStandardFormat() {
         val symlinkData = "lib/libssl.so.3←lib/libssl.so\nbin/sh←bin/bash\n"
         val input = ByteArrayInputStream(symlinkData.toByteArray(StandardCharsets.UTF_8))
-        val parsed = mutableListOf<android.util.Pair<String, String>>()
+        val parsed = mutableListOf<Pair<String, String>>()
         
         // Emulate readSymlinks logic
         input.bufferedReader().useLines { lines ->
             lines.forEach { line ->
                 val parts = line.split("←")
                 if (parts.size == 2) {
-                    parsed.add(android.util.Pair.create(parts[0], parts[1]))
+                    parsed.add(Pair(parts[0], parts[1]))
                 }
             }
         }

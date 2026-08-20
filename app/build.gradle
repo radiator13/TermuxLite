@@ -67,6 +67,10 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+
     lint {
         disable 'ProtectedPermissions', 'ExpiredTargetSdkVersion'
         abortOnError false
