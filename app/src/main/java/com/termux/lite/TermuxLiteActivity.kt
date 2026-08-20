@@ -1,430 +1,806 @@
 package com.termux.lite
 
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.net.Uri
 import android.os.Bundle
+import android.os.IBinder
 import android.util.AttributeSet
+import android.view.ContextMenu
 import android.view.KeyEvent
+import android.view.Menu
 import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import com.termux.terminal.TerminalSession
-import com.termux.terminal.TerminalSessionClient
 import com.termux.view.TerminalView
 import com.termux.view.TerminalViewClient
-
-import java.io.File
-
-import rikka.shizuku.Shizuku
+import kotlinx.coroutines.launch
 
 class TermuxLiteActivity : ComponentActivity() {
 
-    private var terminalView: TerminalView? = null
-    private var session: TerminalSession? = null
+    var terminalView: TerminalView? = null
+    var service: TermuxLiteService? = null
+    var appliedFontSize: Int = -1
+    var attachedSession: TerminalSession? = null
+    var appliedThemeId: String? = null
+    private var lastBackHandledAt = 0L
 
-    companion object {
-        private const val SHIZUKU_REQUEST_CODE = 1001
-    }
+    private var awaitingAllFiles = false
 
-    private val shizukuBinderListener = object : Shizuku.OnBinderReceivedListener {
-        override fun onBinderReceived() {
-            try {
-                if (!Shizuku.isPreV11()) {
-                    val granted = Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
-                    if (!granted) {
-                        Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
-                    }
-                }
-            } catch (_: Exception) {}
+    private val storagePermission = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        if (StoragePermission.has(this)) {
+            applyStorageSetup(true)
+        } else if (StoragePermission.needsAllFilesPage()) {
+            openAllFilesAccess()
+        } else {
+            applyStorageSetup(StoragePermission.hasLegacyWrite(this))
         }
     }
 
-    private val shizukuPermissionListener = object : Shizuku.OnRequestPermissionResultListener {
-        override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
-            // Permission result received — terminal will auto-retry via wrapper
+    private val allFilesAccess = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        awaitingAllFiles = false
+        applyStorageSetup(StoragePermission.has(this))
+    }
+
+    var textSize: Int
+        get() = Prefs.textSize
+        set(value) {
+            Prefs.textSize = value
+            AppState.fontSize = Prefs.textSize
+        }
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val svc = (binder as TermuxLiteService.LocalBinder).getService()
+            service = svc
+            svc.onExitRequested = { finish() }
+            terminalView?.let { svc.attachView(it) }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            service?.onExitRequested = null
+            service = null
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        Prefs.init(this)
+        AppState.loadFromPrefs()
+        applyKeepScreenOn()
 
-        // Register Shizuku listeners BEFORE checking binder
-        try {
-            Shizuku.addBinderReceivedListenerSticky(shizukuBinderListener)
-            Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
-        } catch (_: Exception) {
-            // Shizuku not installed
-        }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                handleSystemBack()
+            }
+        })
+
+        val start = Intent(this, TermuxLiteService::class.java)
+        startService(start)
+        bindService(start, connection, Context.BIND_AUTO_CREATE)
 
         setContent {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-            ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Extra keys bar at top
-                    var ctrlDown by remember { mutableStateOf(false) }
-                    var altDown by remember { mutableStateOf(false) }
+            TermuxLiteApp(activity = this)
+        }
 
-                    ExtraKeysBar(
-                        ctrlDown = ctrlDown,
-                        altDown = altDown,
-                        onToggleCtrl = { ctrlDown = !ctrlDown },
-                        onToggleAlt = { altDown = !altDown },
-                        onKey = { code ->
-                            val session = this@TermuxLiteActivity.session ?: return@ExtraKeysBar
-                            val tv = this@TermuxLiteActivity.terminalView ?: return@ExtraKeysBar
-                            sendSpecialKey(tv, session, code, ctrlDown, altDown)
-                            // Reset modifiers after sending key
-                            ctrlDown = false
-                            altDown = false
-                        }
-                    )
-
-                    // Terminal view fills remaining space
-                    Box(modifier = Modifier.weight(1f).background(Color.Black)) {
-                        TerminalScreen(
-                            onTerminalViewReady = { tv -> terminalView = tv },
-                            onSessionReady = { s -> session = s }
-                        )
-                    }
-                }
+        window.decorView.post {
+            if (StorageActionReceiver.wantsStorage(intent) || !StoragePermission.has(this)) {
+                requestStorageSetup()
             }
         }
     }
 
-    private fun sendSpecialKey(tv: TerminalView, session: TerminalSession, code: Int, ctrlDown: Boolean, altDown: Boolean) {
-        when {
-            // Arrow keys
-            code == KeyEvent.KEYCODE_DPAD_UP -> session.write(byteArrayOf(0x1b, 0x5b, 0x41).toString(Charsets.UTF_8))
-            code == KeyEvent.KEYCODE_DPAD_DOWN -> session.write(byteArrayOf(0x1b, 0x5b, 0x42).toString(Charsets.UTF_8))
-            code == KeyEvent.KEYCODE_DPAD_RIGHT -> session.write(byteArrayOf(0x1b, 0x5b, 0x43).toString(Charsets.UTF_8))
-            code == KeyEvent.KEYCODE_DPAD_LEFT -> session.write(byteArrayOf(0x1b, 0x5b, 0x44).toString(Charsets.UTF_8))
-            // Tab
-            code == KeyEvent.KEYCODE_TAB -> session.write(byteArrayOf(0x09).toString(Charsets.UTF_8))
-            // Escape
-            code == KeyEvent.KEYCODE_ESCAPE -> session.write(byteArrayOf(0x1b).toString(Charsets.UTF_8))
-            // Home (Ctrl+A or ESC[H)
-            code == KeyEvent.KEYCODE_MOVE_HOME -> {
-                if (ctrlDown) session.write(byteArrayOf(0x01).toString(Charsets.UTF_8))
-                else session.write(byteArrayOf(0x1b, 0x5b, 0x48).toString(Charsets.UTF_8))
-            }
-            // End (Ctrl+E or ESC[F)
-            code == KeyEvent.KEYCODE_MOVE_END -> {
-                if (ctrlDown) session.write(byteArrayOf(0x05).toString(Charsets.UTF_8))
-                else session.write(byteArrayOf(0x1b, 0x5b, 0x46).toString(Charsets.UTF_8))
-            }
-            // Page Up
-            code == KeyEvent.KEYCODE_PAGE_UP -> session.write(byteArrayOf(0x1b, 0x5b, 0x35, 0x7e).toString(Charsets.UTF_8))
-            // Page Down
-            code == KeyEvent.KEYCODE_PAGE_DOWN -> session.write(byteArrayOf(0x1b, 0x5b, 0x36, 0x7e).toString(Charsets.UTF_8))
-            // Delete
-            code == KeyEvent.KEYCODE_FORWARD_DEL -> session.write(byteArrayOf(0x1b, 0x5b, 0x33, 0x7e).toString(Charsets.UTF_8))
-            // Ctrl+key combos
-            ctrlDown && code >= KeyEvent.KEYCODE_A && code <= KeyEvent.KEYCODE_Z -> {
-                val ctrlCode = (code - KeyEvent.KEYCODE_A + 1).toByte()
-                session.write(byteArrayOf(ctrlCode).toString(Charsets.UTF_8))
-            }
-            // Alt+key combos (ESC prefix)
-            altDown && code >= KeyEvent.KEYCODE_A && code <= KeyEvent.KEYCODE_Z -> {
-                session.write(byteArrayOf(0x1b, (code - KeyEvent.KEYCODE_A + 'a'.code).toByte()).toString(Charsets.UTF_8))
-            }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (StorageActionReceiver.wantsStorage(intent)) {
+            requestStorageSetup()
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        startService(Intent(this, TermuxLiteService::class.java))
     }
 
     override fun onResume() {
         super.onResume()
         terminalView?.onScreenUpdated()
+        if (awaitingAllFiles && StoragePermission.has(this)) {
+            awaitingAllFiles = false
+            applyStorageSetup(true)
+        }
     }
 
     override fun onDestroy() {
-        super.onDestroy()
-        session?.finishIfRunning()
         try {
-            Shizuku.removeBinderReceivedListener(shizukuBinderListener)
-            Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
-        } catch (_: Exception) {}
+            unbindService(connection)
+        } catch (_: Exception) {
+        }
+        super.onDestroy()
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            AppState.volumeCtrl = event.action != KeyEvent.ACTION_UP
+            return true
+        }
+        if (event.keyCode == KeyEvent.KEYCODE_MENU && event.action == KeyEvent.ACTION_UP) {
+            AppState.settingsOpen = !AppState.settingsOpen
+            return true
+        }
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                handleSystemBack()
+            }
+            return true
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && (event.keyCode == KeyEvent.KEYCODE_ENTER || event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER || event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER)) {
+            val session = currentSession()
+            if (session != null && !session.isRunning) {
+                service?.closeIfFinished(session)
+                return true
+            }
+        }
+        if (Essentials.swallowChromeKey(event.keyCode)) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    /**
+     * Back / predictive-back: close chrome or hide the IME. Never write ESC
+     * (or ^C) to the PTY — extra-keys ESC is the explicit cancel path.
+     */
+    fun handleSystemBack() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastBackHandledAt < 80) return
+        lastBackHandledAt = now
+        if (AppState.settingsOpen) {
+            AppState.settingsOpen = false
+            return
+        }
+        if (AppState.drawerOpen) {
+            AppState.pendingDrawerClose = true
+            return
+        }
+        hideKeyboard()
+    }
+
+    fun hideKeyboardIfVisible(): Boolean {
+        if (!isImeVisible()) return false
+        hideKeyboard()
+        return true
+    }
+
+    fun hideKeyboard() {
+        val view = currentFocus ?: terminalView ?: window.decorView
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(view.windowToken, 0)
+    }
+
+    fun isImeVisible(): Boolean {
+        val view = terminalView ?: window.decorView
+        val insets = ViewCompat.getRootWindowInsets(view)
+            ?: ViewCompat.getRootWindowInsets(window.decorView)
+        return insets?.isVisible(WindowInsetsCompat.Type.ime()) == true
+    }
+
+    fun pasteClipboard() {
+        service?.pasteClipboard()
+    }
+
+    fun openUrl(url: String) {
+        val parsed = try {
+            Uri.parse(url)
+        } catch (_: Exception) {
+            return
+        }
+        if (parsed.scheme.equals("file", ignoreCase = true)) {
+            sendBroadcast(
+                Intent(Intent.ACTION_VIEW)
+                    .setClassName(packageName, "com.termux.app.TermuxOpenReceiver")
+                    .setData(parsed)
+            )
+            return
+        }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, parsed).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        Essentials.stripMenus(menu)
+        return false
+    }
+
+    override fun onPrepareOptionsMenu(menu: Menu): Boolean {
+        Essentials.stripMenus(menu)
+        return false
+    }
+
+    override fun onCreateContextMenu(menu: ContextMenu, v: View, info: ContextMenu.ContextMenuInfo?) {
+        Essentials.stripContextMenu(menu)
+    }
+
+    override fun onContextItemSelected(item: android.view.MenuItem): Boolean = true
+
+    fun currentSession(): TerminalSession? = service?.session
+
+    fun applyAppearance() {
+        service?.reapplyTheme()
+        applyKeepScreenOn()
+    }
+
+    fun setTheme(theme: TerminalTheme) {
+        Prefs.themeId = theme.id
+        AppState.theme = theme
+        applyAppearance()
+    }
+
+    fun setExtraKeys(enabled: Boolean) {
+        Prefs.extraKeys = enabled
+        AppState.extraKeys = enabled
+    }
+
+    fun setKeepScreenOn(enabled: Boolean) {
+        Prefs.keepScreenOn = enabled
+        AppState.keepScreenOn = enabled
+        applyKeepScreenOn()
+    }
+
+    fun setFontSize(size: Int) {
+        textSize = size
+        terminalView?.setTextSize(Prefs.textSize)
+        appliedFontSize = Prefs.textSize
+    }
+
+    private fun applyKeepScreenOn() {
+        if (AppState.keepScreenOn) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    private fun requestStorageSetup() {
+        if (StoragePermission.has(this)) {
+            applyStorageSetup(true)
+            return
+        }
+        if (!StoragePermission.hasLegacyWrite(this)) {
+            storagePermission.launch(StoragePermission.RUNTIME)
+            return
+        }
+        if (StoragePermission.needsAllFilesPage()) {
+            openAllFilesAccess()
+            return
+        }
+        applyStorageSetup(false)
+    }
+
+    private fun openAllFilesAccess() {
+        awaitingAllFiles = true
+        try {
+            allFilesAccess.launch(StoragePermission.manageAppAllFilesIntent(this))
+        } catch (_: Exception) {
+            try {
+                allFilesAccess.launch(StoragePermission.manageAllFilesListIntent())
+            } catch (_: Exception) {
+                try {
+                    allFilesAccess.launch(StoragePermission.appDetailsIntent(this))
+                } catch (_: Exception) {
+                    awaitingAllFiles = false
+                    applyStorageSetup(false)
+                }
+            }
+        }
+    }
+
+    private fun applyStorageSetup(granted: Boolean) {
+        Thread {
+            val result = if (granted) StorageSetup.setup(this) else null
+            val probe = StorageSetup.probeMessage()
+            runOnUiThread {
+                if (!granted) {
+                    currentSession()?.write(
+                        if (StoragePermission.needsAllFilesPage()) {
+                            "\r\n/sdcard denied. Enable All files access.\r\n" +
+                                "If the toggle is missing: App info → menu → Allow restricted settings,\r\n" +
+                                "then Settings → Apps → Special app access → All files access.\r\n"
+                        } else {
+                            "\r\nStorage permission denied. Allow Storage, then run termux-setup-storage again.\r\n"
+                        }
+                    )
+                    return@runOnUiThread
+                }
+                result?.fold(
+                    onSuccess = { dir ->
+                        service?.restartLoginSession()
+                        currentSession()?.write(
+                            "\r\nStorage ready. $probe\r\n" +
+                                "~/storage -> ${dir.absolutePath}   also ~/sdcard\r\n"
+                        )
+                    },
+                    onFailure = { err ->
+                        currentSession()?.write("\r\nStorage setup failed: ${err.message}\r\n")
+                    }
+                )
+            }
+        }.start()
+    }
+
+    fun handleExtra(action: ExtraAction, longPress: Boolean = false) {
+        if (longPress) {
+            when (action) {
+                ExtraAction.Ctrl -> {
+                    AppState.ctrl = AppState.ctrl.lock()
+                    return
+                }
+                ExtraAction.Alt -> {
+                    AppState.alt = AppState.alt.lock()
+                    return
+                }
+                ExtraAction.Keyboard -> {
+                    setExtraKeys(false)
+                    return
+                }
+                ExtraAction.CtrlC -> {
+                    pasteClipboard()
+                    return
+                }
+                ExtraAction.Tab -> {
+                    sendSpecialKey(KeyEvent.KEYCODE_FORWARD_DEL)
+                    AppState.consumeOneShotModifiers()
+                    return
+                }
+                ExtraAction.Left -> {
+                    sendSpecialKey(KeyEvent.KEYCODE_MOVE_HOME)
+                    AppState.consumeOneShotModifiers()
+                    return
+                }
+                ExtraAction.Up -> {
+                    sendSpecialKey(KeyEvent.KEYCODE_PAGE_UP)
+                    AppState.consumeOneShotModifiers()
+                    return
+                }
+                ExtraAction.Down -> {
+                    sendSpecialKey(KeyEvent.KEYCODE_PAGE_DOWN)
+                    AppState.consumeOneShotModifiers()
+                    return
+                }
+                ExtraAction.Right -> {
+                    sendSpecialKey(KeyEvent.KEYCODE_MOVE_END)
+                    AppState.consumeOneShotModifiers()
+                    return
+                }
+                else -> {}
+            }
+        }
+        when (action) {
+            ExtraAction.Ctrl -> {
+                AppState.ctrl = AppState.ctrl.tap()
+            }
+            ExtraAction.Alt -> {
+                AppState.alt = AppState.alt.tap()
+            }
+            ExtraAction.Keyboard -> toggleKeyboard()
+            ExtraAction.Slash -> {
+                currentSession()?.write("/")
+                AppState.consumeOneShotModifiers()
+            }
+            ExtraAction.Minus -> {
+                currentSession()?.write("-")
+                AppState.consumeOneShotModifiers()
+            }
+            ExtraAction.CtrlC -> {
+                currentSession()?.write("\u0003")
+                AppState.consumeOneShotModifiers()
+            }
+            ExtraAction.Paste -> pasteClipboard()
+            else -> {
+                val code = action.toKeyCode() ?: return
+                sendSpecialKey(code)
+                AppState.consumeOneShotModifiers()
+            }
+        }
+    }
+
+    private fun toggleKeyboard() {
+        val tv = terminalView ?: return
+        tv.requestFocus()
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        if (imm.isActive(tv)) {
+            imm.hideSoftInputFromWindow(tv.windowToken, 0)
+        } else {
+            imm.showSoftInput(tv, 0)
+        }
+    }
+
+    private fun sendSpecialKey(code: Int) {
+        val current = currentSession() ?: return
+        if (!current.isRunning && (code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER || code == KeyEvent.KEYCODE_DPAD_CENTER)) {
+            service?.closeIfFinished(current)
+            return
+        }
+        when (code) {
+            KeyEvent.KEYCODE_DPAD_UP -> current.write("\u001b[A")
+            KeyEvent.KEYCODE_DPAD_DOWN -> current.write("\u001b[B")
+            KeyEvent.KEYCODE_DPAD_RIGHT -> current.write("\u001b[C")
+            KeyEvent.KEYCODE_DPAD_LEFT -> current.write("\u001b[D")
+            KeyEvent.KEYCODE_TAB -> current.write("\t")
+            KeyEvent.KEYCODE_ESCAPE -> current.write("\u001b")
+            KeyEvent.KEYCODE_MOVE_HOME -> current.write("\u001b[H")
+            KeyEvent.KEYCODE_MOVE_END -> current.write("\u001b[F")
+            KeyEvent.KEYCODE_PAGE_UP -> current.write("\u001b[5~")
+            KeyEvent.KEYCODE_PAGE_DOWN -> current.write("\u001b[6~")
+            KeyEvent.KEYCODE_FORWARD_DEL -> current.write("\u001b[3~")
+        }
+    }
+
+    companion object {
+        const val ACTION_SETUP_STORAGE = "com.termux.lite.SETUP_STORAGE"
+        const val PREFS_NAME = Prefs.NAME
+        const val KEY_TEXT_SIZE = Prefs.KEY_TEXT_SIZE
+        const val DEFAULT_TEXT_SIZE = Prefs.DEFAULT_TEXT_SIZE
+        const val MIN_TEXT_SIZE = Prefs.MIN_TEXT_SIZE
+        const val MAX_TEXT_SIZE = Prefs.MAX_TEXT_SIZE
     }
 }
 
+private class LiteViewClient(
+    private val activity: TermuxLiteActivity,
+    private val tv: TerminalView
+) : TerminalViewClient {
+
+    override fun onScale(scale: Float): Float {
+        // Ignore small scale jitter from a one-finger scroll; only pinch.
+        if (scale < 0.8f || scale > 1.25f) {
+            val next = if (scale > 1f) {
+                (activity.textSize + 1).coerceAtMost(TermuxLiteActivity.MAX_TEXT_SIZE)
+            } else {
+                (activity.textSize - 1).coerceAtLeast(TermuxLiteActivity.MIN_TEXT_SIZE)
+            }
+            activity.setFontSize(next)
+            return 1.0f
+        }
+        return scale
+    }
+
+    override fun onSingleTapUp(e: MotionEvent) {
+        val url = UrlAtTap.find(tv, e)
+        if (url != null) {
+            activity.openUrl(url)
+            return
+        }
+        tv.requestFocus()
+        val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(tv, 0)
+    }
+
+    override fun shouldBackButtonBeMappedToEscape() = false
+    override fun shouldEnforceCharBasedInput() = false
+    override fun shouldUseCtrlSpaceWorkaround() = false
+    override fun isTerminalViewSelected() = !AppState.settingsOpen
+    override fun copyModeChanged(copyMode: Boolean) {}
+    override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean {
+        if (!session.isRunning && (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER || keyCode == KeyEvent.KEYCODE_DPAD_CENTER)) {
+            activity.service?.closeIfFinished(session)
+            return true
+        }
+        // TerminalView maps BACK to ESC in onKeyPreIme when the flag above is
+        // true. Keep swallowing BACK here too so a focused view never writes
+        // ESC / cancel into the PTY (Grok CLI, vim, etc.).
+        return keyCode == KeyEvent.KEYCODE_BACK
+    }
+    override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean {
+        return keyCode == KeyEvent.KEYCODE_BACK
+    }
+    override fun onLongPress(event: MotionEvent) = false
+    override fun readControlKey() = AppState.controlDown()
+    override fun readAltKey() = AppState.altDown()
+    override fun readShiftKey() = false
+    override fun readFnKey() = false
+    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean {
+        if (!session.isRunning && (codePoint == 13 || codePoint == 10)) {
+            activity.service?.closeIfFinished(session)
+            return true
+        }
+        AppState.consumeOneShotModifiers()
+        return false
+    }
+    override fun onEmulatorSet() {
+        TermThemes.apply(activity.currentSession(), tv)
+    }
+    override fun logError(tag: String, message: String) {}
+    override fun logWarn(tag: String, message: String) {}
+    override fun logInfo(tag: String, message: String) {}
+    override fun logDebug(tag: String, message: String) {}
+    override fun logVerbose(tag: String, message: String) {}
+    override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {}
+    override fun logStackTrace(tag: String, e: Exception) {}
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ExtraKeysBar(
-    ctrlDown: Boolean,
-    altDown: Boolean,
-    onToggleCtrl: () -> Unit,
-    onToggleAlt: () -> Unit,
-    onKey: (Int) -> Unit
+fun TermuxLiteApp(
+    activity: TermuxLiteActivity
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF1A1A1A))
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 4.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-        verticalAlignment = Alignment.CenterVertically
+    val theme = AppState.theme
+    val sessions = AppState.sessions
+    val imeVisible = WindowInsets.isImeVisible
+    val state = AppState.bootstrap
+    val settingsOpen = AppState.settingsOpen
+    val extraKeys = AppState.extraKeys
+    val ready = state is BootstrapState.Ready
+
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    val view = LocalView.current
+
+    LaunchedEffect(drawerState) {
+        snapshotFlow { drawerState.isOpen }.collect { AppState.drawerOpen = it }
+    }
+
+    SideEffect {
+        val window = activity.window
+        window.statusBarColor = theme.chromeColor.toArgb()
+        window.navigationBarColor = theme.chromeColor.toArgb()
+        WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = theme.isLight
+            isAppearanceLightNavigationBars = theme.isLight
+        }
+    }
+
+    LaunchedEffect(AppState.pendingDrawerClose) {
+        if (AppState.pendingDrawerClose) {
+            drawerState.close()
+            AppState.pendingDrawerClose = false
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        // Drawer drag fights terminal vertical scroll and makes it jitter.
+        gesturesEnabled = false,
+        drawerContent = {
+            SessionDrawer(
+                theme = theme,
+                sessions = sessions,
+                bootstrapReady = ready,
+                onSelect = { id ->
+                    activity.service?.switchSession(id)
+                    scope.launch { drawerState.close() }
+                },
+                onNew = {
+                    activity.service?.createSession()
+                    scope.launch { drawerState.close() }
+                },
+                onClose = { id -> activity.service?.closeSession(id) },
+                onRename = { id, name -> activity.service?.renameSession(id, name) },
+                onSettings = {
+                    AppState.settingsOpen = true
+                    scope.launch { drawerState.close() }
+                }
+            )
+        }
     ) {
-        // Modifier keys (toggle)
-        ExtraKey("Ctrl", isActive = ctrlDown, onClick = onToggleCtrl, width = 48)
-        ExtraKey("Alt", isActive = altDown, onClick = onToggleAlt, width = 40)
-
-        Spacer(modifier = Modifier.width(4.dp))
-
-        // Arrow keys
-        ExtraKey("▲", onClick = { onKey(KeyEvent.KEYCODE_DPAD_UP) }, width = 36)
-        ExtraKey("▼", onClick = { onKey(KeyEvent.KEYCODE_DPAD_DOWN) }, width = 36)
-        ExtraKey("◀", onClick = { onKey(KeyEvent.KEYCODE_DPAD_LEFT) }, width = 36)
-        ExtraKey("▶", onClick = { onKey(KeyEvent.KEYCODE_DPAD_RIGHT) }, width = 36)
-
-        Spacer(modifier = Modifier.width(4.dp))
-
-        // Special keys
-        ExtraKey("Tab", onClick = { onKey(KeyEvent.KEYCODE_TAB) }, width = 40)
-        ExtraKey("Esc", onClick = { onKey(KeyEvent.KEYCODE_ESCAPE) }, width = 36)
-        ExtraKey("Home", onClick = { onKey(KeyEvent.KEYCODE_MOVE_HOME) }, width = 44)
-        ExtraKey("End", onClick = { onKey(KeyEvent.KEYCODE_MOVE_END) }, width = 40)
-
-        Spacer(modifier = Modifier.width(4.dp))
-
-        // Page keys
-        ExtraKey("PgUp", onClick = { onKey(KeyEvent.KEYCODE_PAGE_UP) }, width = 44)
-        ExtraKey("PgDn", onClick = { onKey(KeyEvent.KEYCODE_PAGE_DOWN) }, width = 44)
-
-        Spacer(modifier = Modifier.width(4.dp))
-
-        // Function keys
-        ExtraKey("Del", onClick = { onKey(KeyEvent.KEYCODE_FORWARD_DEL) }, width = 36)
+        Box(modifier = Modifier.fillMaxSize().background(theme.bgColor)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding()
+                    .imePadding()
+            ) {
+                val currentTitle = sessions.firstOrNull { it.selected }?.title ?: "TermuxLite"
+                TopBar(
+                    theme = theme,
+                    title = currentTitle,
+                    sessions = sessions,
+                    canCreate = ready && sessions.size < MAX_SESSIONS,
+                    onMenu = {
+                        scope.launch {
+                            if (drawerState.isOpen) drawerState.close() else drawerState.open()
+                        }
+                    },
+                    onSelect = { id -> activity.service?.switchSession(id) },
+                    onNew = { activity.service?.createSession() },
+                    onSettings = { AppState.settingsOpen = !AppState.settingsOpen }
+                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 4.dp)
+                ) {
+                    if (ready) {
+                        TerminalScreen()
+                    } else {
+                        BootstrapOverlay(
+                            state = state,
+                            theme = theme,
+                            onRetry = { activity.service?.retryBootstrap() },
+                            onCancel = { activity.service?.cancelBootstrap() }
+                        )
+                    }
+                    if (settingsOpen) {
+                        SettingsScreen(
+                            theme = theme,
+                            fontSize = AppState.fontSize,
+                            extraKeys = extraKeys,
+                            keepScreenOn = AppState.keepScreenOn,
+                            onTheme = { activity.setTheme(it) },
+                            onFontSize = { activity.setFontSize(it) },
+                            onExtraKeys = { activity.setExtraKeys(it) },
+                            onKeepScreenOn = { activity.setKeepScreenOn(it) },
+                            onClose = { AppState.settingsOpen = false },
+                            onOpenUrl = { activity.openUrl(it) }
+                        )
+                    }
+                }
+                if (extraKeys && !settingsOpen && imeVisible) {
+                    ExtraKeysPad(
+                        ctrl = AppState.ctrl,
+                        alt = AppState.alt,
+                        theme = theme,
+                        onAction = { action, longPress -> activity.handleExtra(action, longPress) }
+                    )
+                }
+            }
+        }
     }
 }
 
 @Composable
-fun ExtraKey(
-    label: String,
-    isActive: Boolean = false,
-    isCtrl: Boolean = false,
-    width: Int = 40,
-    onClick: () -> Unit
-) {
-    val bgColor = when {
-        isActive -> Color(0xFF4CAF50)  // Green when active
-        isCtrl -> Color(0xFF333333)
-        else -> Color(0xFF2D2D2D)
-    }
-    val textColor = when {
-        isActive -> Color.Black
-        else -> Color(0xFFCCCCCC)
-    }
-
-    Box(
-        modifier = Modifier
-            .height(32.dp)
-            .width(width.dp)
-            .background(bgColor)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            color = textColor,
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center
-        )
-    }
-}
-
-@Composable
-fun TerminalScreen(
-    onTerminalViewReady: (TerminalView) -> Unit,
-    onSessionReady: (TerminalSession) -> Unit
-) {
+fun TerminalScreen() {
     val context = LocalContext.current
     val activity = context as TermuxLiteActivity
+    val theme = AppState.theme
+    val fontSize = AppState.fontSize
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
-            val tv = TerminalView(ctx, null as AttributeSet?)
-            tv.setBackgroundColor(android.graphics.Color.BLACK)
-
-            var currentTextSize = 14
-
-            val viewClient = object : TerminalViewClient {
-                override fun onScale(scale: Float): Float {
-                    if (scale < 0.9f || scale > 1.1f) {
-                        if (scale > 1f) currentTextSize = (currentTextSize + 1).coerceAtMost(40)
-                        else currentTextSize = (currentTextSize - 1).coerceAtLeast(6)
-                        tv.setTextSize(currentTextSize)
-                        return 1.0f
-                    }
-                    return scale
-                }
-                override fun onSingleTapUp(e: MotionEvent) {
-                    tv.requestFocus()
-                    val imm = ctx.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
-                        as android.view.inputmethod.InputMethodManager
-                    imm.showSoftInput(tv, 0)
-                }
-                override fun shouldBackButtonBeMappedToEscape() = true
-                override fun shouldEnforceCharBasedInput() = false
-                override fun shouldUseCtrlSpaceWorkaround() = false
-                override fun isTerminalViewSelected() = true
-                override fun copyModeChanged(copyMode: Boolean) {}
-                override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession) = false
-                override fun onKeyUp(keyCode: Int, e: KeyEvent) = false
-                override fun onLongPress(event: MotionEvent) = false
-                override fun readControlKey() = false
-                override fun readAltKey() = false
-                override fun readShiftKey() = false
-                override fun readFnKey() = false
-                override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession) = false
-                override fun onEmulatorSet() {}
-                override fun logError(tag: String, message: String) {}
-                override fun logWarn(tag: String, message: String) {}
-                override fun logInfo(tag: String, message: String) {}
-                override fun logDebug(tag: String, message: String) {}
-                override fun logVerbose(tag: String, message: String) {}
-                override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {}
-                override fun logStackTrace(tag: String, e: Exception) {}
-            }
-            tv.setTerminalViewClient(viewClient)
-
-            // Initialize renderer BEFORE attachSession (required)
-            tv.setTextSize(14)
-
-            // Focus properties for keyboard
+            val host = TerminalScrollHost(ctx)
+            val tv = host.terminal
+            tv.setTextSize(activity.textSize)
+            activity.appliedFontSize = activity.textSize
             tv.isFocusable = true
             tv.isFocusableInTouchMode = true
             tv.isClickable = true
-
-            onTerminalViewReady(tv)
-
-            // Defer session creation until after layout pass
+            tv.setTerminalViewClient(LiteViewClient(activity, tv))
+            Essentials.disableContextMenu(tv)
+            host.onUrlTap = { activity.openUrl(it) }
+            activity.terminalView = tv
+            TermThemes.apply(activity.currentSession(), tv, theme)
+            activity.appliedThemeId = theme.id
             tv.post {
-                val homeDir = ctx.filesDir.absolutePath
-                File(homeDir).mkdirs()
-                File("$homeDir/tmp").mkdirs()
-
-                // Copy rish and wrapper from assets/data to app's internal dir
-                val binDir = File("$homeDir/bin")
-                binDir.mkdirs()
-                val rishDst = File(binDir, "rish")
-                val dexDst = File(binDir, "rish_shizuku.dex")
-                val wrapperDst = File(binDir, "shell_wrapper.sh")
-
-                // Copy wrapper script from assets
-                try {
-                    ctx.assets.open("shell_wrapper.sh").use { input ->
-                        wrapperDst.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                    wrapperDst.setExecutable(true, false)
-                    wrapperDst.setReadable(true, false)
-                } catch (_: Exception) {}
-
-                // Copy rish from /data/local/tmp if available
-                if (!rishDst.exists()) {
-                    try {
-                        File("/data/local/tmp/rish").copyTo(rishDst, overwrite = true)
-                        File("/data/local/tmp/rish_shizuku.dex").copyTo(dexDst, overwrite = true)
-                        rishDst.setExecutable(true, false)
-                        rishDst.setReadable(true, false)
-                        dexDst.setReadable(true, false)
-                        dexDst.setExecutable(false, false)
-                    } catch (_: Exception) {}
-                }
-
-                // Use wrapper script if available, otherwise fallback
-                val shellPath = if (wrapperDst.exists() && wrapperDst.canExecute()) {
-                    wrapperDst.absolutePath
-                } else {
-                    "/system/bin/sh"
-                }
-
-                val env = arrayOf(
-                    "TERM=xterm-256color",
-                    "HOME=$homeDir",
-                    "PATH=/system/bin:/system/xbin",
-                    "LANG=en_US.UTF-8",
-                    "TMPDIR=$homeDir/tmp",
-                    "RISH_APPLICATION_ID=com.termux.lite"
-                )
-
-                val sessionClient = object : TerminalSessionClient {
-                    override fun onTextChanged(changedSession: TerminalSession) {
-                        tv.onScreenUpdated()
-                    }
-                    override fun onTitleChanged(changedSession: TerminalSession) {}
-                    override fun onSessionFinished(finishedSession: TerminalSession) {
-                        // If rish exited immediately, fall back to /system/bin/sh
-                        if (shellPath != "/system/bin/sh") {
-                            val fallbackSession = TerminalSession(
-                                "/system/bin/sh", homeDir,
-                                arrayOf("/system/bin/sh"), env, 5000, this
-                            )
-                            tv.attachSession(fallbackSession)
-                        }
-                    }
-                    override fun onCopyTextToClipboard(session: TerminalSession, text: String) {
-                        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                            as android.content.ClipboardManager
-                        cm.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text))
-                    }
-                    override fun onPasteTextFromClipboard(session: TerminalSession) {
-                        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
-                            as android.content.ClipboardManager
-                        val clip = cm.primaryClip
-                        if (clip != null && clip.itemCount > 0) {
-                            val text = clip.getItemAt(0).coerceToText(ctx).toString()
-                            session.write(text)
-                        }
-                    }
-                    override fun onBell(session: TerminalSession) {}
-                    override fun onColorsChanged(session: TerminalSession) {}
-                    override fun onTerminalCursorStateChange(state: Boolean) {}
-                    override fun getTerminalCursorStyle(): Int? = null
-                    override fun logError(tag: String, message: String) {}
-                    override fun logWarn(tag: String, message: String) {}
-                    override fun logInfo(tag: String, message: String) {}
-                    override fun logDebug(tag: String, message: String) {}
-                    override fun logVerbose(tag: String, message: String) {}
-                    override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {}
-                    override fun logStackTrace(tag: String, e: Exception) {}
-                }
-
-                val s = TerminalSession(shellPath, homeDir, arrayOf(shellPath), env, 5000, sessionClient)
-                tv.attachSession(s)
-                onSessionReady(s)
-
-                // Request focus and show keyboard
+                activity.service?.attachView(tv)
+                activity.attachedSession = activity.currentSession()
                 tv.requestFocus()
-                tv.post {
-                    val imm = ctx.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
-                        as android.view.inputmethod.InputMethodManager
-                    imm.showSoftInput(tv, 0)
-                }
             }
-
-            tv
+            host
+        },
+        update = { host ->
+            val tv = (host as TerminalScrollHost).terminal
+            if (activity.appliedFontSize != fontSize) {
+                tv.setTextSize(fontSize)
+                activity.appliedFontSize = fontSize
+            }
+            val current = activity.currentSession()
+            if (activity.terminalView !== tv || activity.attachedSession !== current) {
+                activity.service?.attachView(tv)
+                activity.attachedSession = current
+            }
+            if (activity.appliedThemeId != theme.id) {
+                TermThemes.apply(current, tv, theme)
+                activity.appliedThemeId = theme.id
+            }
         }
     )
+}
+
+@Composable
+fun BootstrapOverlay(
+    state: BootstrapState,
+    theme: TerminalTheme,
+    onRetry: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 8.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "TermuxLite",
+            color = theme.fgColor,
+            fontSize = 20.sp,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+        )
+        Text(
+            text = when (state) {
+                is BootstrapState.Starting -> "Preparing…"
+                is BootstrapState.Downloading -> {
+                    val mb = state.bytes / (1024 * 1024)
+                    val totBytes = if (state.total > 0) state.total else BootstrapConfig.SIZE_BYTES
+                    val tot = totBytes / (1024 * 1024)
+                    val pct = if (totBytes > 0) (state.bytes * 100 / totBytes).coerceIn(0, 100) else 0
+                    "Downloading Termux bootstrap…\n$mb / $tot MB ($pct%)\nNeeds network, once."
+                }
+                is BootstrapState.Extracting -> "Extracting bootstrap…"
+                is BootstrapState.SecondStage -> "Running second stage…"
+                is BootstrapState.Ready -> "Ready"
+                is BootstrapState.Error -> "Bootstrap failed:\n${state.message}"
+            },
+            color = if (state is BootstrapState.Error) color(0xFFB00020.toInt()) else theme.fgColor,
+            fontSize = 14.sp,
+            fontFamily = FontFamily.Monospace,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (state is BootstrapState.Downloading) {
+            TextButton(onClick = onCancel) {
+                Text("Cancel", color = theme.accentColor, fontFamily = FontFamily.Monospace)
+            }
+        }
+        if (state is BootstrapState.Error) {
+            TextButton(onClick = onRetry) {
+                Text("Retry", color = theme.accentColor, fontFamily = FontFamily.Monospace)
+            }
+        }
+    }
 }

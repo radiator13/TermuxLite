@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">TermuxLite</string>
+    <string name="shared_user_label">Termux user</string>
 </resources>

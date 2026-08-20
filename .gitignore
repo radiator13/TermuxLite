@@ -16,3 +16,6 @@
 
 terminal-emulator/
 terminal-view/
+.sigtmp/
+out/
+dist/

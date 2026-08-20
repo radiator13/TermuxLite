@@ -11,18 +11,34 @@ android {
     ndkVersion "29.0.14206865"
 
     defaultConfig {
-        applicationId = "com.termux.lite"
+        applicationId = "com.termux"
         minSdk = 24
+        // Keep 28 so /data/data/com.termux/files/usr stays executable and
+        // WRITE_EXTERNAL_STORAGE still covers /sdcard.
         targetSdk = 28
-        versionCode = 1
-        versionName = "1.0.0"
+        // Above Termux 0.118.0 (1020) and TermuxLite 1.1.0 (1021).
+        versionCode = 1025
+        versionName = "1.2.3"
 
         ndk {
             abiFilters 'arm64-v8a'
         }
+
+        externalNativeBuild {
+            cmake {
+                cFlags "-O3 -flto -fvisibility=hidden -ffunction-sections -fdata-sections"
+                cppFlags "-O3 -flto -fvisibility=hidden -ffunction-sections -fdata-sections"
+            }
+            ndkBuild {
+                cFlags "-O3 -flto -fvisibility=hidden"
+                cppFlags "-O3 -flto -fvisibility=hidden"
+            }
+        }
     }
 
     signingConfigs {
+        // Official Termux community debug key (testkey_untrusted.jks)
+        // Cert SHA-256: b6da01480eefd5fbf2cd3771b8d1021ec791304bdd6c4bf41d3faabad48ee5e1
         debug {
             storeFile file('testkey_untrusted.jks')
             keyAlias 'alias'
@@ -33,8 +49,9 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled = false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            minifyEnabled = true
+            shrinkResources = false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig = signingConfigs.debug
         }
         debug {
@@ -48,10 +65,17 @@ android {
     }
     kotlinOptions {
         jvmTarget = "1.8"
+        freeCompilerArgs += [
+            "-Xbackend-threads=4",
+            "-Xno-param-assertions",
+            "-Xno-call-assertions",
+            "-opt-in=kotlin.RequiresOptIn"
+        ]
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     lint {
@@ -63,6 +87,16 @@ android {
         jniLibs {
             useLegacyPackaging = true
         }
+        resources {
+            excludes += [
+                '/META-INF/{AL2.0,LGPL2.1}',
+                '/META-INF/*.version',
+                '/META-INF/*.kotlin_module',
+                '/META-INF/DEPENDENCIES',
+                '/META-INF/LICENSE*',
+                '/META-INF/NOTICE*'
+            ]
+        }
     }
 }
 
@@ -70,6 +104,7 @@ dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib:2.0.21"
     implementation "androidx.core:core-ktx:1.13.1"
     implementation "androidx.activity:activity-compose:1.9.0"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1"
 
     def composeBom = platform("androidx.compose:compose-bom:2024.06.00")
     implementation composeBom
@@ -81,8 +116,5 @@ dependencies {
     // Official Termux terminal emulator + view from JitPack
     implementation "com.github.termux.termux-app:terminal-view:v0.118.3"
 
-    // Shizuku API for rish access
-    implementation "dev.rikka.shizuku:api:13.1.5"
-    implementation "dev.rikka.shizuku:provider:13.1.5"
-    implementation "dev.rikka.shizuku:aidl:13.1.5"
+    testImplementation "junit:junit:4.13.2"
 }
