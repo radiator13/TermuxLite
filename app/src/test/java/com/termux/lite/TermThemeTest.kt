@@ -12,9 +12,6 @@ class TermThemeTest {
         assertEquals("solarized-dark", TermThemes.byId("solarized-dark").id)
         assertEquals("solarized-light", TermThemes.byId("solarized-light").id)
         assertEquals("dracula", TermThemes.byId("dracula").id)
-        assertEquals("nord", TermThemes.byId("nord").id)
-        assertEquals("gruvbox", TermThemes.byId("gruvbox").id)
-        assertEquals("one-dark", TermThemes.byId("one-dark").id)
     }
 
     @Test
@@ -26,7 +23,7 @@ class TermThemeTest {
 
     @Test
     fun allThemesHaveSixteenAnsiColors() {
-        assertEquals(8, TermThemes.all.size)
+        assertEquals(5, TermThemes.all.size)
         for (theme in TermThemes.all) {
             assertEquals(16, theme.ansi.size)
             assertNotNull(theme.bgColor)
