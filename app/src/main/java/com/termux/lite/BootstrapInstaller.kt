@@ -351,6 +351,10 @@ class BootstrapInstaller(
 
     companion object {
         fun sha256(file: File): String {
+            val nativeHash = NativeBridge.sha256File(file)
+            if (nativeHash != null && nativeHash.isNotEmpty()) {
+                return nativeHash
+            }
             val digest = MessageDigest.getInstance("SHA-256")
             FileInputStream(file).use { raw ->
                 DigestInputStream(raw, digest).use { din ->

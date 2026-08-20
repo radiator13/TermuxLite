@@ -56,6 +56,9 @@ object UrlAtTap {
 
     internal fun urlAt(line: String, col: Int): String? {
         if (line.isEmpty()) return null
+        val nativeHit = NativeBridge.findUrlAt(line, col)
+        if (nativeHit != null) return nativeHit
+
         val hits = findUrls(line)
         if (hits.isEmpty()) return null
         val i = col.coerceIn(0, line.lastIndex)

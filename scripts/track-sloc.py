@@ -13,7 +13,12 @@ import re
 EXTENSIONS = {
     '.kt': 'Kotlin',
     '.java': 'Java',
+    '.cpp': 'C/C++',
+    '.hpp': 'C/C++',
+    '.c': 'C/C++',
+    '.h': 'C/C++',
     '.gradle': 'Gradle (Groovy/Kotlin)',
+    '.cmake': 'CMake',
     '.xml': 'XML',
     '.py': 'Python',
     '.sh': 'Shell',
@@ -43,7 +48,7 @@ def analyze_file(filepath, ext):
             blank_lines += 1
             continue
 
-        if ext in ('.kt', '.java', '.gradle', '.pro'):
+        if ext in ('.kt', '.java', '.cpp', '.hpp', '.c', '.h', '.gradle', '.pro'):
             if in_multiline:
                 comment_lines += 1
                 if '*/' in s:
@@ -108,6 +113,8 @@ def scan_repo(repo_root='.'):
             if f in IGNORE_FILES:
                 continue
             _, ext = os.path.splitext(f)
+            if f == 'CMakeLists.txt':
+                ext = '.cmake'
             if ext in EXTENSIONS:
                 lang = EXTENSIONS[ext]
                 filepath = os.path.join(root, f)
