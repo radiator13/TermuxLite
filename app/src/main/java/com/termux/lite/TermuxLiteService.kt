@@ -257,7 +257,7 @@ class TermuxLiteService : Service() {
             "TERMUX_APP__PACKAGE_NAME=com.termux",
             "TERMUX_APP_PACKAGE_MANAGER=apt",
             "EXTERNAL_STORAGE=/sdcard"
-        )
+        ) + AndroidEnv.sessionEnvExtras()
 
         val shell = paths.guestShell()
         val s = TerminalSession(
