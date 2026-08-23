@@ -103,7 +103,9 @@ class TermuxLiteActivity : ComponentActivity() {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val svc = (binder as TermuxLiteService.LocalBinder).getService()
             service = svc
-            svc.onExitRequested = { finish() }
+            svc.onExitRequested = {
+                if (!isFinishing) finishAndRemoveTask()
+            }
             terminalView?.let { svc.attachView(it) }
         }
 
@@ -144,6 +146,15 @@ class TermuxLiteActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (isFinishing) {
+            startActivity(
+                Intent(this, TermuxLiteActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            )
+            return
+        }
+        startService(Intent(this, TermuxLiteService::class.java))
+        terminalView?.let { service?.attachView(it) }
         if (StorageActionReceiver.wantsStorage(intent)) {
             requestStorageSetup()
         }
@@ -151,12 +162,15 @@ class TermuxLiteActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (isFinishing) return
         startService(Intent(this, TermuxLiteService::class.java))
     }
 
     override fun onResume() {
         super.onResume()
+        if (isFinishing) return
         terminalView?.onScreenUpdated()
+        terminalView?.let { tv -> service?.attachView(tv) }
         if (awaitingAllFiles && StoragePermission.has(this)) {
             awaitingAllFiles = false
             applyStorageSetup(true)
@@ -164,6 +178,8 @@ class TermuxLiteActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        service?.onExitRequested = null
+        service?.detachView(terminalView)
         try {
             unbindService(connection)
         } catch (_: Exception) {

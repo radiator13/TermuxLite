@@ -55,29 +55,26 @@ class TermuxLiteService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            requestFullStop()
+            return START_NOT_STICKY
+        }
+        // A new start means the user wants the service alive. Clear a previous
+        // stop that did not actually destroy this instance (still bound).
+        stopping = false
+        startForeground(NOTIF_ID, buildNotification())
         when (intent?.action) {
-            ACTION_STOP -> {
-                stopSessionAndSelf()
-                return START_NOT_STICKY
-            }
             ACTION_NEW -> {
-                startForeground(NOTIF_ID, buildNotification())
                 if (AppState.bootstrap is BootstrapState.Ready) {
                     createSession()
                 } else {
                     ensureBootstrapThenSession()
                 }
-                return START_STICKY
             }
-            ACTION_CYCLE -> {
-                startForeground(NOTIF_ID, buildNotification())
-                cycleSession()
-                return START_STICKY
-            }
+            ACTION_CYCLE -> cycleSession()
+            else -> ensureBootstrapThenSession()
         }
-        startForeground(NOTIF_ID, buildNotification())
-        ensureBootstrapThenSession()
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -87,13 +84,15 @@ class TermuxLiteService : Service() {
         holders.forEach { it.session.finishIfRunning() }
         holders.clear()
         currentId = -1
-        publishSessions()
+        AppState.sessions = emptyList()
+        terminalView = null
         worker.shutdownNow()
         super.onDestroy()
     }
 
     fun attachView(tv: TerminalView) {
         terminalView = tv
+        if (stopping) return
         val current = session
         if (current != null) {
             if (tv.mTermSession !== current) {
@@ -105,6 +104,11 @@ class TermuxLiteService : Service() {
         } else if (AppState.bootstrap is BootstrapState.Ready) {
             createSession()
         }
+    }
+
+    fun detachView(tv: TerminalView?) {
+        if (tv == null || terminalView !== tv) return
+        terminalView = null
     }
 
     fun retryBootstrap() {
@@ -154,7 +158,8 @@ class TermuxLiteService : Service() {
     }
 
     fun createSession(): Boolean {
-        if (stopping) return false
+        // Plus / notification New are explicit "keep running" requests.
+        stopping = false
         if (AppState.bootstrap !is BootstrapState.Ready) return false
         if (holders.size >= MAX_SESSIONS) return false
         if (!paths.isReady()) return false
@@ -172,17 +177,16 @@ class TermuxLiteService : Service() {
     }
 
     fun closeSession(id: Int) {
+        if (stopping) return
         val holder = holders.find { it.id == id } ?: return
         val wasCurrent = holder.id == currentId
         holders.remove(holder)
         holder.session.finishIfRunning()
         if (holders.isEmpty()) {
-            if (!stopping && AppState.bootstrap is BootstrapState.Ready) {
-                addSessionInternal()
-            } else {
-                currentId = -1
-            }
-        } else if (wasCurrent) {
+            requestFullStop()
+            return
+        }
+        if (wasCurrent) {
             val next = holders.firstOrNull { it.session.isRunning } ?: holders.first()
             currentId = next.id
         }
@@ -191,21 +195,14 @@ class TermuxLiteService : Service() {
     }
 
     fun closeIfFinished(session: TerminalSession) {
-        main.post {
-            if (stopping) return@post
-            val holder = holders.find { it.session === session } ?: return@post
-            if (holder.session.isRunning) return@post
+        val run = Runnable {
+            if (stopping) return@Runnable
+            val holder = holders.find { it.session === session } ?: currentHolder() ?: return@Runnable
+            if (holder.session.isRunning) return@Runnable
             val others = holders.filter { it.id != holder.id }
             if (others.isEmpty()) {
-                val exitCallback = onExitRequested
-                val act = findActivity(terminalView?.context)
-                stopSessionAndSelf()
-                if (exitCallback != null) {
-                    exitCallback.invoke()
-                } else {
-                    act?.finish()
-                }
-                return@post
+                requestFullStop()
+                return@Runnable
             }
             holders.remove(holder)
             holder.session.finishIfRunning()
@@ -213,6 +210,11 @@ class TermuxLiteService : Service() {
             currentId = next.id
             attachCurrent()
             publishSessions()
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            run.run()
+        } else {
+            main.post(run)
         }
     }
 
@@ -307,13 +309,15 @@ class TermuxLiteService : Service() {
                 title = displayTitle(h, i),
                 running = h.session.isRunning,
                 selected = h.id == currentId,
-                canClose = holders.size > 1 || !h.session.isRunning
+                canClose = true
             )
         }
+        if (stopping) return
         startForeground(NOTIF_ID, buildNotification(runningCount))
     }
 
     private fun ensureBootstrapThenSession() {
+        if (stopping) return
         if (AppState.bootstrap is BootstrapState.Ready) {
             if (holders.isEmpty()) createSession()
             return
@@ -323,6 +327,7 @@ class TermuxLiteService : Service() {
         worker.execute {
             BootstrapInstaller(paths, { bootstrapCancel.get() }) { state ->
                 main.post {
+                    if (stopping) return@post
                     AppState.bootstrap = state
                     if (state is BootstrapState.Ready) {
                         if (holders.isEmpty()) createSession()
@@ -335,14 +340,30 @@ class TermuxLiteService : Service() {
         }
     }
 
-    private fun stopSessionAndSelf() {
+    private fun requestFullStop() {
         stopping = true
         holders.forEach { it.session.finishIfRunning() }
         holders.clear()
         currentId = -1
-        publishSessions()
-        @Suppress("DEPRECATION")
-        stopForeground(true)
+        AppState.sessions = emptyList()
+        val host = findActivity(terminalView?.context)
+        val exit = onExitRequested
+        onExitRequested = null
+        terminalView = null
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } catch (_: Exception) {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        (getSystemService(NotificationManager::class.java))?.cancel(NOTIF_ID)
+        try {
+            exit?.invoke()
+        } catch (_: Exception) {
+        }
+        if (host != null && !host.isFinishing) {
+            host.finishAndRemoveTask()
+        }
         stopSelf()
     }
 
@@ -369,6 +390,10 @@ class TermuxLiteService : Service() {
             main.post {
                 if (stopping) return@post
                 publishSessions()
+                val status = finishedSession.exitStatus
+                if (shouldAutoCloseFinishedSession(status, holders.size)) {
+                    closeIfFinished(finishedSession)
+                }
             }
         }
 
@@ -416,7 +441,11 @@ class TermuxLiteService : Service() {
     private fun buildNotification(runningCount: Int = holders.count { it.session.isRunning }): Notification {
         val open = PendingIntent.getActivity(
             this, 0,
-            Intent(this, TermuxLiteActivity::class.java).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            Intent(this, TermuxLiteActivity::class.java).setFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            ),
             pendingFlags()
         )
         val stop = PendingIntent.getService(
@@ -479,4 +508,8 @@ class TermuxLiteService : Service() {
         const val NOTIF_ID = 1
         const val TRANSCRIPT_ROWS = 5000
     }
+}
+
+internal fun shouldAutoCloseFinishedSession(exitStatus: Int, sessionCount: Int): Boolean {
+    return sessionCount <= 1 || exitStatus == 0 || exitStatus == 130
 }
