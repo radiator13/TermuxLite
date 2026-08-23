@@ -25,6 +25,13 @@ object UrlAtTap {
         "twitter.com/"
     )
 
+    /** A URL cut off at end-of-line looks like an unfinished scheme URL. */
+    private val CUT_OFF_URL = Regex(
+        """(?i)(?:https?|ftps?|file)://\S+$|www\.\S+$|(?:github|gitlab|bitbucket)\.com/\S+$|(?:x|twitter)\.com/\S+$"""
+    )
+    private const val URL_CONTINUATION_CHARS =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~:/?#[]@!\$&'()*+,;%=-"
+
     fun find(tv: TerminalView, event: MotionEvent): String? {
         val emulator = tv.mEmulator ?: return null
         val cr = tv.getColumnAndRow(event, true)
@@ -45,22 +52,73 @@ object UrlAtTap {
             y2 = row
         }
 
-        val line = try {
-            emulator.getSelectedText(0, y1, emulator.mColumns, y2)
+        fun rowText(r: Int): String? = try {
+            emulator.getSelectedText(0, r, emulator.mColumns, r)?.takeIf { it.isNotEmpty() }
         } catch (_: Exception) {
-            return null
+            null
         }
-        if (line.isNullOrEmpty()) return null
 
-        var index = 0
-        try {
-            for (r in y1 until row) {
-                index += emulator.getSelectedText(0, r, emulator.mColumns, r).length
+        // Build the logical line from per-row extraction so we control joining
+        // exactly (no hidden separators, no trimming asymmetry), and keep the
+        // char offset of every row for precise tap-index math.
+        val segments = ArrayList<String>(y2 - y1 + 1)
+        var baseIndex = 0
+        var haveTappedRow = false
+        for (r in y1..y2) {
+            val text = rowText(r) ?: run {
+                segments.add("")
+                continue
             }
-        } catch (_: Exception) {
+            if (r < row) baseIndex += text.length
+            if (r == row) haveTappedRow = true
+            segments.add(text)
         }
-        index += col.coerceAtLeast(0)
+        if (!haveTappedRow) return null
+        var line = segments.joinToString("")
+        val tappedSegment = segments.getOrNull(row - y1) ?: return null
+
+        // Hard-wrapped output (explicit '\n' instead of LineWrap) splits URLs
+        // across rows; heal by absorbing continuation rows while the tail of
+        // the line still looks like an unfinished URL.
+        line = healHardWrapped(line) { i -> rowText(y2 + 1 + i)?.trimStart() }
+
+        val indexInTapped = col.coerceIn(0, tappedSegment.length.coerceAtLeast(0))
+        val index = baseIndex + indexInTapped
         return urlAt(line, index)
+    }
+
+    /**
+     * If the line ends with what looks like a truncated URL, append following
+     * rows (up to [maxRows]) while they continue it. Returns the healed line.
+     */
+    internal fun healHardWrapped(line: String, nextRow: (Int) -> String?, maxRows: Int = 4): String {
+        var current = line
+        repeat(maxRows) {
+            val hits = findUrls(current)
+            val tail = hits.lastOrNull()
+            val candidate = tail?.takeIf { h ->
+                h.end >= current.length - 1 &&
+                    CUT_OFF_URL.containsMatchIn(h.url) &&
+                    (h.url.last().isLetterOrDigit() || h.url.last() == '/')
+            } ?: return current
+            val continuation = nextRow(it)?.trimStart() ?: return current
+            val token = continuation.substringBefore(' ').trimEnd()
+            if (!isUrlContinuation(token, candidate.url)) return current
+            current += token
+        }
+        return current
+    }
+
+    private fun isUrlContinuation(token: String, previousUrl: String): Boolean {
+        if (token.isEmpty()) return false
+        if (token.contains("://")) return false
+        if (token.startsWith("www.", true)) return false
+        if (!token[0].isLetterOrDigit()) return false
+        if (token.endsWith(".")) return false
+        if (!token.all { it in URL_CONTINUATION_CHARS }) return false
+        // Only join when it plausibly continues a path: either the URL so far
+        // ends at a directory boundary ('/') or the fragment itself carries one.
+        return previousUrl.endsWith("/") || token.contains('/')
     }
 
     internal fun urlAt(line: String, col: Int): String? {

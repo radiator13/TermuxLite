@@ -258,8 +258,9 @@ class TermuxLiteActivity : ComponentActivity() {
     }
 
     fun openUrl(url: String) {
+        val trimmed = url.trim()
         val parsed = try {
-            Uri.parse(url)
+            Uri.parse(trimmed)
         } catch (_: Exception) {
             return
         }
@@ -274,6 +275,15 @@ class TermuxLiteActivity : ComponentActivity() {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, parsed).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (_: Exception) {
+            try {
+                startActivity(
+                    Intent.createChooser(
+                        Intent(Intent.ACTION_VIEW, parsed).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        "Open with"
+                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (_: Exception) {
+            }
         }
     }
 
