@@ -48,7 +48,7 @@ impl<'a> JniEnvGuard<'a> {
     /// # Safety
     /// `env` must be a valid non-null JNIEnv pointer.
     pub unsafe fn from_raw(env: *mut JNIEnv) -> Option<Self> {
-        if env.is_null() || (*env).is_null() {
+        if env.is_null() || unsafe { (*env).is_null() } {
             None
         } else {
             Some(Self {

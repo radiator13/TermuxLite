@@ -406,7 +406,8 @@ class TermuxLiteService : Service() {
             cm.setPrimaryClip(ClipData.newPlainText("terminal", text))
         }
 
-        override fun onPasteTextFromClipboard(session: TerminalSession) {
+        override fun onPasteTextFromClipboard(session: TerminalSession?) {
+            if (session == null) return
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val clip = cm.primaryClip
             if (clip != null && clip.itemCount > 0) {
@@ -420,6 +421,7 @@ class TermuxLiteService : Service() {
             TermThemes.lock(changedSession, view)
         }
         override fun onTerminalCursorStateChange(state: Boolean) {}
+        override fun setTerminalShellPid(session: TerminalSession, pid: Int) {}
         override fun getTerminalCursorStyle(): Int? = null
         override fun logError(tag: String, message: String) {}
         override fun logWarn(tag: String, message: String) {}

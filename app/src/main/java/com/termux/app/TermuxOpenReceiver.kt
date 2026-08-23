@@ -120,7 +120,7 @@ class TermuxOpenReceiver : BroadcastReceiver() {
                 MediaStore.MediaColumns.SIZE,
                 MediaStore.MediaColumns._ID
             )
-            val row = Array(cols.size) { i ->
+            val row = Array<Any?>(cols.size) { i ->
                 when (cols[i]) {
                     MediaStore.MediaColumns.DISPLAY_NAME -> file.name
                     MediaStore.MediaColumns.SIZE -> file.length().toInt()

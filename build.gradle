@@ -1,20 +1,6 @@
-buildscript {
-    repositories {
-        mavenCentral()
-        google()
-        gradlePluginPortal()
-    }
-    dependencies {
-        classpath "com.android.tools.build:gradle:8.13.2"
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21"
-        classpath "org.jetbrains.kotlin:compose-compiler-gradle-plugin:2.0.21"
-    }
-}
-
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-        maven { url 'https://jitpack.io' }
-    }
+plugins {
+    // Compose compiler plugin also pulls Kotlin 2.4.10 onto the build
+    // classpath, overriding AGP 9.3's bundled KGP 2.2.10.
+    id 'com.android.application' version '9.3.1' apply false
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.4.10' apply false
 }

@@ -5,7 +5,7 @@ pub mod jni_bridge;
 use jni_bridge::{jboolean, jclass, jint, jstring, JniEnvGuard, JNIEnv, JNI_TRUE};
 use std::ptr;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn Java_com_termux_lite_NativeBridge_nativeIsAvailable(
     _env: *mut JNIEnv,
     _class: jclass,
@@ -13,13 +13,13 @@ pub unsafe extern "C" fn Java_com_termux_lite_NativeBridge_nativeIsAvailable(
     JNI_TRUE
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn Java_com_termux_lite_NativeBridge_nativeSha256File(
     env: *mut JNIEnv,
     _class: jclass,
     file_path_jstr: jstring,
 ) -> jstring {
-    let Some(guard) = JniEnvGuard::from_raw(env) else {
+    let Some(guard) = (unsafe { JniEnvGuard::from_raw(env) }) else {
         return ptr::null_mut();
     };
 
@@ -33,14 +33,14 @@ pub unsafe extern "C" fn Java_com_termux_lite_NativeBridge_nativeSha256File(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn Java_com_termux_lite_NativeBridge_nativeFindUrlAt(
     env: *mut JNIEnv,
     _class: jclass,
     line_jstr: jstring,
     col: jint,
 ) -> jstring {
-    let Some(guard) = JniEnvGuard::from_raw(env) else {
+    let Some(guard) = (unsafe { JniEnvGuard::from_raw(env) }) else {
         return ptr::null_mut();
     };
 

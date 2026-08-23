@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{Read, BufReader};
 
 pub fn sha256_bytes(bytes: &[u8]) -> String {
-    hex_lower(&sha2::Sha256::digest(bytes))
+    hex_lower(sha2::Sha256::digest(bytes).as_ref())
 }
 
 pub fn sha256_file(path: &str) -> Option<String> {
@@ -20,7 +20,7 @@ pub fn sha256_file(path: &str) -> Option<String> {
         }
     }
 
-    Some(hex_lower(&hasher.finalize()))
+    Some(hex_lower(hasher.finalize().as_ref()))
 }
 
 fn hex_lower(bytes: &[u8]) -> String {
