@@ -75,7 +75,7 @@ class UrlAtTapTest {
     fun hardWrappedUrlIsHealedAcrossRows() {
         val line = "docs at https://github.com/radiator13/"
         val next = "TermuxLite/issues now"
-        val healed = UrlAtTap.healHardWrapped(line) { if (it == 0) next else null }
+        val healed = UrlAtTap.healHardWrapped(line, nextRow = { i -> if (i == 0) next else null })
         assertEquals(
             "https://github.com/radiator13/TermuxLite/issues",
             UrlAtTap.urlAt(healed, line.length - 2)
@@ -86,7 +86,7 @@ class UrlAtTapTest {
     fun hardWrappedMidTokenSplitHealsWhenFragmentHasSlash() {
         val line = "open https://example.com/docs/Ter"
         val next = "minal/page here"
-        val healed = UrlAtTap.healHardWrapped(line) { if (it == 0) next else null }
+        val healed = UrlAtTap.healHardWrapped(line, nextRow = { i -> if (i == 0) next else null })
         assertEquals(
             "https://example.com/docs/Terminal/page",
             UrlAtTap.urlAt(healed, 8)
@@ -97,14 +97,14 @@ class UrlAtTapTest {
     fun completeUrlIsNotGluedToNextSentence() {
         val line = "visit https://example.com today"
         // Next row starts a new sentence; nothing may be appended.
-        val healed = UrlAtTap.healHardWrapped(line) { if (it == 0) "and enjoy." else null }
+        val healed = UrlAtTap.healHardWrapped(line, nextRow = { i -> if (i == 0) "and enjoy." else null })
         assertEquals("https://example.com", UrlAtTap.urlAt(healed, 9))
     }
 
     @Test
     fun nonUrlTailIsNotHealed() {
         val line = "plain text ending in word"
-        assertEquals(line, UrlAtTap.healHardWrapped(line) { "more stuff" })
+        assertEquals(line, UrlAtTap.healHardWrapped(line, nextRow = { _ -> "more stuff" }))
     }
 
     @Test
