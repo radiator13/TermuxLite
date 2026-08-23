@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 data class SessionInfo(
     val id: Int,
     val title: String,
+    val label: String,
     val running: Boolean,
     val selected: Boolean,
     val canClose: Boolean

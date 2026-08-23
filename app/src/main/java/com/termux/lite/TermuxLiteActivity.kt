@@ -665,7 +665,7 @@ fun TermuxLiteApp(
                         WindowInsets.navigationBars.union(WindowInsets.ime)
                     )
             ) {
-                val currentTitle = sessions.firstOrNull { it.selected }?.title ?: "TermuxLite"
+                val currentTitle = sessions.firstOrNull { it.selected }?.label ?: "TermuxLite"
                 TopBar(
                     theme = theme,
                     title = currentTitle,

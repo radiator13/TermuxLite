@@ -283,14 +283,14 @@ class TermuxLiteService : Service() {
         tv.onScreenUpdated()
     }
 
-    private fun displayTitle(holder: SessionHolder, index: Int): String {
+    private fun sessionLabel(holder: SessionHolder): String {
         val custom = holder.customName?.trim()?.takeIf { it.isNotEmpty() }
         val named = holder.session.mSessionName?.trim()?.takeIf { it.isNotEmpty() }
         val osc = holder.session.title?.trim()?.takeIf { it.isNotEmpty() }
         val cwd = cwdLabel(holder.session)
         val name = custom ?: named ?: osc ?: cwd ?: "login"
         val suffix = if (holder.session.isRunning) "" else " (exit)"
-        return "${index + 1}. $name$suffix"
+        return "$name$suffix"
     }
 
     private fun cwdLabel(session: TerminalSession): String? {
@@ -306,9 +306,11 @@ class TermuxLiteService : Service() {
     private fun publishSessions() {
         val runningCount = holders.count { it.session.isRunning }
         AppState.sessions = holders.mapIndexed { i, h ->
+            val label = sessionLabel(h)
             SessionInfo(
                 id = h.id,
-                title = displayTitle(h, i),
+                title = "${i + 1}. $label",
+                label = label,
                 running = h.session.isRunning,
                 selected = h.id == currentId,
                 canClose = true
