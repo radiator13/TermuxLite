@@ -16,6 +16,15 @@ object UrlAtTap {
         """(?i)\b((?:github|gitlab|bitbucket)\.com/[^\s<>"'\]\}>]+|(?:x|twitter)\.com/[^\s<>"'\]\}>]+)"""
     )
 
+    // Mirrors scanner.rs normalize_url: only these bare domains gain https://.
+    private val HOSTED_PREFIXES = listOf(
+        "github.com/",
+        "gitlab.com/",
+        "bitbucket.com/",
+        "x.com/",
+        "twitter.com/"
+    )
+
     fun find(tv: TerminalView, event: MotionEvent): String? {
         val emulator = tv.mEmulator ?: return null
         val cr = tv.getColumnAndRow(event, true)
@@ -56,7 +65,8 @@ object UrlAtTap {
 
     internal fun urlAt(line: String, col: Int): String? {
         if (line.isEmpty()) return null
-        val nativeHit = NativeBridge.findUrlAt(line, col)
+        // The native scanner indexes spans in UTF-8 bytes; col is char-based.
+        val nativeHit = NativeBridge.findUrlAt(line, utf8ByteOffsetOfCharIndex(line, col))
         if (nativeHit != null) return nativeHit
 
         val hits = findUrls(line)
@@ -104,10 +114,17 @@ object UrlAtTap {
             token.startsWith("mailto:", ignoreCase = true) -> token
             token.startsWith("www.", ignoreCase = true) -> "https://$token"
             token.contains("://") -> token
-            else -> "https://$token"
+            HOSTED_PREFIXES.any { token.startsWith(it, ignoreCase = true) } -> "https://$token"
+            else -> return null
         }
         if (url.startsWith("http", ignoreCase = true) && url.length < 10) return null
         return url
+    }
+
+    internal fun utf8ByteOffsetOfCharIndex(line: String, charIndex: Int): Int {
+        if (line.isEmpty() || charIndex <= 0) return 0
+        val end = charIndex.coerceAtMost(line.length)
+        return line.substring(0, end).toByteArray(Charsets.UTF_8).size
     }
 
     private fun dist(i: Int, hit: UrlHit): Int {

@@ -9,6 +9,9 @@ description = "High-performance Rust native engine for TermuxLite"
 name = "termuxlite_native"
 crate-type = ["cdylib", "rlib"]
 
+[dependencies]
+sha2 = "0.10"
+
 [profile.release]
 opt-level = 3
 lto = true

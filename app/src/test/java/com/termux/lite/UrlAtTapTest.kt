@@ -76,5 +76,15 @@ class UrlAtTapTest {
         assertNull(UrlAtTap.urlAt("just some text", 4))
         assertNull(UrlAtTap.urlAt("", 0))
         assertTrue(UrlAtTap.findUrls("no links here").isEmpty())
+        assertNull(UrlAtTap.normalize("not-a-host.example/path"))
+    }
+
+    @Test
+    fun utf8ByteOffsetMatchesAsciiAndMultibyte() {
+        assertEquals(0, UrlAtTap.utf8ByteOffsetOfCharIndex("abc", 0))
+        assertEquals(3, UrlAtTap.utf8ByteOffsetOfCharIndex("abc", 3))
+        assertEquals(2, UrlAtTap.utf8ByteOffsetOfCharIndex("éx", 1))
+        val line = "café https://example.com"
+        assertEquals("https://example.com", UrlAtTap.urlAt(line, line.indexOf('h')))
     }
 }

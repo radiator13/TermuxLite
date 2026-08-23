@@ -727,7 +727,7 @@ fun TermuxLiteApp(
 @Composable
 fun TerminalScreen() {
     val context = LocalContext.current
-    val activity = context as TermuxLiteActivity
+    val activity = context as? TermuxLiteActivity ?: return
     val theme = AppState.theme
     val fontSize = AppState.fontSize
 

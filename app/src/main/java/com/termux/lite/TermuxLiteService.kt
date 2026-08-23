@@ -197,7 +197,9 @@ class TermuxLiteService : Service() {
     fun closeIfFinished(session: TerminalSession) {
         val run = Runnable {
             if (stopping) return@Runnable
-            val holder = holders.find { it.session === session } ?: currentHolder() ?: return@Runnable
+            // Only act on sessions we actually own — never fall back to the
+            // current holder or we would close an unrelated session.
+            val holder = holders.find { it.session === session } ?: return@Runnable
             if (holder.session.isRunning) return@Runnable
             val others = holders.filter { it.id != holder.id }
             if (others.isEmpty()) {
