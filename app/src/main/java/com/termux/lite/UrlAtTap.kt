@@ -80,7 +80,7 @@ object UrlAtTap {
         // Hard-wrapped output (explicit '\n' instead of LineWrap) splits URLs
         // across rows; heal by absorbing continuation rows while the tail of
         // the line still looks like an unfinished URL.
-        line = healHardWrapped(line) { i -> rowText(y2 + 1 + i)?.trimStart() }
+        line = healHardWrapped(line, nextRow = { i -> rowText(y2 + 1 + i)?.trimStart() })
 
         val indexInTapped = col.coerceIn(0, tappedSegment.length.coerceAtLeast(0))
         val index = baseIndex + indexInTapped
