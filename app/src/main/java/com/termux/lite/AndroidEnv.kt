@@ -29,13 +29,28 @@ object AndroidEnv {
         "/(am|wm|bmgr|bu|abx|content|pm|svc|requestsync|uiautomator|monkey|input|settings|incident)\\.jar$"
     )
 
-    /** Updatable APEX modules whose javalib jars join the boot classpath when present. */
+    /**
+     * Updatable APEX modules whose javalib jars join the boot classpath.
+     * Apps cannot enumerate /apex (readdir denied) nor read
+     * apex-info-list.xml, but CAN list a named module's javalib/, so we
+     * probe every AOSP module known to ship jars there. Missing one only
+     * costs its classes (e.g. virt -> virtualization); unknown future
+     * modules degrade gracefully since ART boots on core+framework alone.
+     */
     private val APEX_MODULES = arrayOf(
-        "conscrypt", "media", "mediaprovider", "statsd", "permission", "sdkext",
-        "wifi", "tethering", "adservices", "ondevicepersonalization", "healthfitness",
-        "btservices", "uwb", "cellbroadcast", "remotekeyprovisioning", "rkpd"
+        "adbd", "adservices", "appsearch", "art", "btservices", "cellbroadcast",
+        "conscrypt", "healthfitness", "i18n", "media", "mediaprovider",
+        "ondevicepersonalization", "os", "permission", "profiling", "rkpd",
+        "remotekeyprovisioning", "sdkext", "statsd", "tethering", "uwb",
+        "virt", "wifi"
     )
 
+    /**
+     * BOOTCLASSPATH: core libs first (order mirrors AOSP init.environ.rc,
+     * ICU4J third), then /system/framework, then every probeable APEX
+     * javalib. LinkedHashSet keeps first occurrence so the explicit core
+     * entries win over duplicates rediscovered under art/i18n APEXes.
+     */
     fun bootClasspath(): String {
         val parts = LinkedHashSet<String>()
         for (j in CORE_JARS) if (File(j).isFile) parts.add(j)
@@ -55,8 +70,6 @@ object AndroidEnv {
             } catch (_: Exception) {
             }
         }
-        val serviceArt = File("$ART_APEX/javalib/service-art.jar")
-        if (serviceArt.isFile) parts.add(serviceArt.absolutePath)
         return parts.joinToString(":")
     }
 
