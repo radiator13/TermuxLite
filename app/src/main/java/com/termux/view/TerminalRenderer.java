@@ -12,10 +12,11 @@ import com.termux.terminal.TextStyle;
 import com.termux.terminal.WcWidth;
 
 /**
- * Renderer of a {@link TerminalEmulator} into a {@link Canvas} with support for
- * continuous sub-row pixel scrolling and partial line clipping.
+ * Renderer of a {@link TerminalEmulator} into a {@link Canvas}.
+ * <p/>
+ * Saves font metrics, so needs to be recreated each time the typeface or font size changes.
  */
-public final class SmoothTerminalRenderer {
+public final class TerminalRenderer {
 
     final int mTextSize;
     final Typeface mTypeface;
@@ -23,16 +24,16 @@ public final class SmoothTerminalRenderer {
 
     /** The width of a single mono spaced character obtained by {@link Paint#measureText(String)} on a single 'X'. */
     final float mFontWidth;
-    /** The {@link Paint#getFontSpacing()}. */
+    /** The {@link Paint#getFontSpacing()}. See http://www.fampennings.nl/maarten/android/08numgrid/font.png */
     final int mFontLineSpacing;
-    /** The {@link Paint#ascent()}. */
+    /** The {@link Paint#ascent()}. See http://www.fampennings.nl/maarten/android/08numgrid/font.png */
     private final int mFontAscent;
     /** The {@link #mFontLineSpacing} + {@link #mFontAscent}. */
     final int mFontLineSpacingAndAscent;
 
     private final float[] asciiMeasures = new float[127];
 
-    public SmoothTerminalRenderer(int textSize, Typeface typeface) {
+    public TerminalRenderer(int textSize, Typeface typeface) {
         mTextSize = textSize;
         mTypeface = typeface;
 
@@ -52,20 +53,15 @@ public final class SmoothTerminalRenderer {
         }
     }
 
-    /**
-     * Render the terminal to a canvas with smooth sub-row pixel scrolling offset.
-     *
-     * @param mEmulator       the terminal emulator
-     * @param canvas          the target canvas
-     * @param topRow          the base integer top row (e.g. 0 at bottom, negative in history)
-     * @param subRowOffsetPx  the continuous sub-row downward pixel shift in [0, mFontLineSpacing)
-     * @param selectionY1     selection start row
-     * @param selectionY2     selection end row
-     * @param selectionX1     selection start column
-     * @param selectionX2     selection end column
-     */
-    public final void renderSmooth(TerminalEmulator mEmulator, Canvas canvas, int topRow, float subRowOffsetPx,
-                                   int selectionY1, int selectionY2, int selectionX1, int selectionX2) {
+    /** Render the terminal to a canvas with at a specified row scroll, and an optional rectangular selection. */
+    public final void render(TerminalEmulator mEmulator, Canvas canvas, int topRow,
+                             int selectionY1, int selectionY2, int selectionX1, int selectionX2) {
+        render(mEmulator, canvas, topRow, 0f, selectionY1, selectionY2, selectionX1, selectionX2);
+    }
+
+    /** Render the terminal to a canvas with smooth sub-row offset and an optional rectangular selection. */
+    public final void render(TerminalEmulator mEmulator, Canvas canvas, int topRow, float subRowOffsetPx,
+                             int selectionY1, int selectionY2, int selectionX1, int selectionX2) {
         final boolean reverseVideo = mEmulator.isReverseVideo();
         final int columns = mEmulator.mColumns;
         final int cursorCol = mEmulator.getCursorCol();
@@ -75,15 +71,12 @@ public final class SmoothTerminalRenderer {
         final int[] palette = mEmulator.mColors.mCurrentColors;
         final int cursorShape = mEmulator.getCursorStyle();
 
-        if (reverseVideo) {
+        if (reverseVideo)
             canvas.drawColor(palette[TextStyle.COLOR_INDEX_FOREGROUND], PorterDuff.Mode.SRC);
-        }
 
         final int activeTranscript = screen.getActiveTranscriptRows();
         final int screenRows = mEmulator.mRows;
 
-        // When shifted down by subRowOffsetPx > 0, the bottom of the preceding line
-        // (topRow - 1) is partially visible at the top of the viewport.
         int startRow = topRow;
         float baseHeightOffset = mFontLineSpacingAndAscent + subRowOffsetPx;
         if (subRowOffsetPx > 0.001f && (topRow - 1) >= -activeTranscript) {
@@ -91,7 +84,6 @@ public final class SmoothTerminalRenderer {
             baseHeightOffset = mFontLineSpacingAndAscent - mFontLineSpacing + subRowOffsetPx;
         }
 
-        // Render through the bottom of the screen (plus 1 extra line if shifted down).
         int endRow = topRow + screenRows;
         if (subRowOffsetPx > 0.001f) {
             endRow = Math.min(endRow + 1, screenRows);
@@ -105,7 +97,7 @@ public final class SmoothTerminalRenderer {
             int selx1 = -1, selx2 = -1;
             if (row >= selectionY1 && row <= selectionY2) {
                 if (row == selectionY1) selx1 = selectionX1;
-                selx2 = (row == selectionY2) ? selectionX2 : columns;
+                selx2 = (row == selectionY2) ? selectionX2 : mEmulator.mColumns;
             }
 
             TerminalRow lineObject = screen.allocateFullLineIfNecessary(screen.externalToInternalRow(row));
@@ -131,15 +123,21 @@ public final class SmoothTerminalRenderer {
                 final boolean insideSelection = column >= selx1 && column <= selx2;
                 final long style = lineObject.getStyle(column);
 
+                // Check if the measured text width for this code point is not the same as that expected by wcwidth().
+                // This could happen for some fonts which are not truly monospace, or for more exotic characters such as
+                // smileys which android font renders as wide.
+                // If this is detected, we draw this code point scaled to match what wcwidth() expects.
                 final float measuredCodePointWidth = (codePoint < asciiMeasures.length) ? asciiMeasures[codePoint] : mTextPaint.measureText(line,
                     currentCharIndex, charsForCodePoint);
                 final boolean fontWidthMismatch = Math.abs(measuredCodePointWidth / mFontWidth - codePointWcWidth) > 0.01;
 
                 if (style != lastRunStyle || insideCursor != lastRunInsideCursor || insideSelection != lastRunInsideSelection || fontWidthMismatch || lastRunFontWidthMismatch) {
-                    if (column != 0) {
+                    if (column == 0) {
+                        // Skip first column as there is nothing to draw, just record the current style.
+                    } else {
                         final int columnWidthSinceLastRun = column - lastRunStartColumn;
                         final int charsSinceLastRun = currentCharIndex - lastRunStartIndex;
-                        int cursorColor = lastRunInsideCursor ? palette[TextStyle.COLOR_INDEX_CURSOR] : 0;
+                        int cursorColor = lastRunInsideCursor ? mEmulator.mColors.mCurrentColors[TextStyle.COLOR_INDEX_CURSOR] : 0;
                         boolean invertCursorTextColor = false;
                         if (lastRunInsideCursor && cursorShape == TerminalEmulator.TERMINAL_CURSOR_STYLE_BLOCK) {
                             invertCursorTextColor = true;
@@ -160,13 +158,15 @@ public final class SmoothTerminalRenderer {
                 column += codePointWcWidth;
                 currentCharIndex += charsForCodePoint;
                 while (currentCharIndex < charsUsedInLine && WcWidth.width(line, currentCharIndex) <= 0) {
+                    // Eat combining chars so that they are treated as part of the last non-combining code point,
+                    // instead of e.g. being considered inside the cursor in the next run.
                     currentCharIndex += Character.isHighSurrogate(line[currentCharIndex]) ? 2 : 1;
                 }
             }
 
             final int columnWidthSinceLastRun = columns - lastRunStartColumn;
             final int charsSinceLastRun = currentCharIndex - lastRunStartIndex;
-            int cursorColor = lastRunInsideCursor ? palette[TextStyle.COLOR_INDEX_CURSOR] : 0;
+            int cursorColor = lastRunInsideCursor ? mEmulator.mColors.mCurrentColors[TextStyle.COLOR_INDEX_CURSOR] : 0;
             boolean invertCursorTextColor = false;
             if (lastRunInsideCursor && cursorShape == TerminalEmulator.TERMINAL_CURSOR_STYLE_BLOCK) {
                 invertCursorTextColor = true;
@@ -189,6 +189,7 @@ public final class SmoothTerminalRenderer {
         final boolean dim = (effect & TextStyle.CHARACTER_ATTRIBUTE_DIM) != 0;
 
         if ((foreColor & 0xff000000) != 0xff000000) {
+            // Let bold have bright colors if applicable (one of the first 8):
             if (bold && foreColor >= 0 && foreColor < 8) foreColor += 8;
             foreColor = palette[foreColor];
         }
@@ -197,6 +198,7 @@ public final class SmoothTerminalRenderer {
             backColor = palette[backColor];
         }
 
+        // Reverse video here if _one and only one_ of the reverse flags are set:
         final boolean reverseVideoHere = reverseVideo ^ (effect & (TextStyle.CHARACTER_ATTRIBUTE_INVERSE)) != 0;
         if (reverseVideoHere) {
             int tmp = foreColor;
@@ -218,6 +220,7 @@ public final class SmoothTerminalRenderer {
         }
 
         if (backColor != palette[TextStyle.COLOR_INDEX_BACKGROUND]) {
+            // Only draw non-default background.
             mTextPaint.setColor(backColor);
             canvas.drawRect(left, y - mFontLineSpacingAndAscent + mFontAscent, right, y, mTextPaint);
         }
@@ -235,6 +238,8 @@ public final class SmoothTerminalRenderer {
                 int red = (0xFF & (foreColor >> 16));
                 int green = (0xFF & (foreColor >> 8));
                 int blue = (0xFF & foreColor);
+                // Dim color handling used by libvte which in turn took it from xterm
+                // (https://bug735245.bugzilla-attachments.gnome.org/attachment.cgi?id=284267):
                 red = red * 2 / 3;
                 green = green * 2 / 3;
                 blue = blue * 2 / 3;
@@ -247,6 +252,7 @@ public final class SmoothTerminalRenderer {
             mTextPaint.setStrikeThruText(strikeThrough);
             mTextPaint.setColor(foreColor);
 
+            // The text alignment is the default Paint.Align.LEFT.
             canvas.drawTextRun(text, startCharIndex, runWidthChars, startCharIndex, runWidthChars, left, y - mFontLineSpacingAndAscent, false, mTextPaint);
         }
 
@@ -259,9 +265,5 @@ public final class SmoothTerminalRenderer {
 
     public int getFontLineSpacing() {
         return mFontLineSpacing;
-    }
-
-    public int getFontLineSpacingAndAscent() {
-        return mFontLineSpacingAndAscent;
     }
 }

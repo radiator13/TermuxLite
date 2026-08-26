@@ -10,18 +10,18 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.OverScroller
 import com.termux.terminal.TerminalEmulator
-import com.termux.view.SmoothTerminalView
+import com.termux.view.TerminalView
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
  * Intercepts vertical finger motion to provide continuous smooth pixel scrolling
  * for terminal transcript history and full-range fling for TUI apps.
- * Taps, pinch-zoom, and text selection stay on [SmoothTerminalView].
+ * Taps, pinch-zoom, and text selection stay on [TerminalView].
  */
 class TerminalScrollHost(context: Context) : FrameLayout(context) {
 
-    val terminal: SmoothTerminalView = SmoothTerminalView(context, null as AttributeSet?)
+    val terminal: TerminalView = TerminalView(context, null as AttributeSet?)
     var onUrlTap: ((String) -> Unit)? = null
     private var maybeTap = false
     private val scroller = OverScroller(context)

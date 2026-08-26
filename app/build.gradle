@@ -111,8 +111,8 @@ dependencies {
     implementation "androidx.compose.ui:ui-tooling-preview"
     debugImplementation "androidx.compose.ui:ui-tooling"
 
-    // Official Termux terminal-view; pulls matching terminal-emulator.
-    implementation "com.github.termux.termux-app:terminal-view:v0.119.0-beta.3"
+    // Official Termux terminal-emulator (terminal-view source is inlined in app/src/main/java/com/termux/view).
+    implementation "com.github.termux.termux-app:terminal-emulator:v0.119.0-beta.3"
 
     testImplementation "junit:junit:4.13.2"
 }
