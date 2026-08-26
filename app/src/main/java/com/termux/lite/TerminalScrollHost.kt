@@ -332,12 +332,13 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
 
     private fun maxTranscriptScroll(): Float {
         val spacing = lineSpacing()
-        return terminal.activeTranscriptRows() * spacing
+        val emu = terminal.mEmulator ?: return 0f
+        return emu.screen.activeTranscriptRows * spacing
     }
 
     private fun lineSpacing(): Float {
-        val s = terminal.lineSpacing()
-        if (s > 0f) return s
+        val r = terminal.mRenderer
+        if (r != null && r.fontLineSpacing > 0) return r.fontLineSpacing.toFloat()
         val emu = terminal.mEmulator ?: return 0f
         val rows = emu.mRows.coerceAtLeast(1)
         val h = terminal.height
