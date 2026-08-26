@@ -10,18 +10,18 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.OverScroller
 import com.termux.terminal.TerminalEmulator
-import com.termux.view.TerminalView
+import com.termux.view.SmoothTerminalView
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Intercepts vertical finger motion so terminal history and TUI apps (Grok CLI)
- * get a full-range fling instead of Termux's 0.25× / ±half-screen scroll.
- * Taps, pinch-zoom, and text selection stay on [TerminalView].
+ * Intercepts vertical finger motion to provide continuous smooth pixel scrolling
+ * for terminal transcript history and full-range fling for TUI apps.
+ * Taps, pinch-zoom, and text selection stay on [SmoothTerminalView].
  */
 class TerminalScrollHost(context: Context) : FrameLayout(context) {
 
-    val terminal: TerminalView = TerminalView(context, null as AttributeSet?)
+    val terminal: SmoothTerminalView = SmoothTerminalView(context, null as AttributeSet?)
     var onUrlTap: ((String) -> Unit)? = null
     private var maybeTap = false
     private val scroller = OverScroller(context)
@@ -34,7 +34,14 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
     private var lastY = 0f
     private var intercepting = false
     private var remainder = 0f
+    private var scrollOffsetY = 0f
     private var velocityTracker: VelocityTracker? = null
+
+    private var flingLastY = 0
+    private var flingSeed: MotionEvent? = null
+    private var flingMode = FlingMode.History
+
+    private enum class FlingMode { History, Mouse, Arrows }
 
     init {
         addView(
@@ -50,15 +57,17 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        if (terminal.topRow >= 0) {
-            terminal.topRow = 0
+        if (terminal.topRow >= 0 && scrollOffsetY <= 0.01f) {
+            scrollOffsetY = 0f
+            terminal.resetScroll()
         }
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
-        if (changed && terminal.topRow >= 0) {
-            terminal.topRow = 0
+        if (changed && terminal.topRow >= 0 && scrollOffsetY <= 0.01f) {
+            scrollOffsetY = 0f
+            terminal.resetScroll()
         }
     }
 
@@ -72,6 +81,12 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
                 downY = ev.y
                 lastY = ev.y
                 remainder = 0f
+                val spacing = lineSpacing()
+                if (spacing > 0f && (terminal.topRow < 0 || terminal.subRowOffsetPx > 0f)) {
+                    scrollOffsetY = (-terminal.topRow * spacing + terminal.subRowOffsetPx).coerceIn(0f, maxTranscriptScroll())
+                } else if (terminal.topRow >= 0) {
+                    scrollOffsetY = 0f
+                }
                 parent?.requestDisallowInterceptTouchEvent(true)
                 return false
             }
@@ -186,22 +201,26 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
 
     override fun computeScroll() {
         if (!scroller.computeScrollOffset()) return
-        val newY = scroller.currY
-        val diff = newY - flingLastY
-        flingLastY = newY
-        if (diff != 0) {
-            applyRows(flingSeed, diff)
+        when (flingMode) {
+            FlingMode.History -> {
+                val newY = scroller.currY.toFloat()
+                val maxScroll = maxTranscriptScroll()
+                scrollOffsetY = newY.coerceIn(0f, maxScroll)
+                applySmoothScrollOffset(scrollOffsetY, lineSpacing())
+            }
+            FlingMode.Mouse, FlingMode.Arrows -> {
+                val newY = scroller.currY
+                val diff = newY - flingLastY
+                flingLastY = newY
+                if (diff != 0) {
+                    applyRows(flingSeed, diff)
+                }
+            }
         }
         if (!scroller.isFinished) {
             postInvalidateOnAnimation()
         }
     }
-
-    private var flingLastY = 0
-    private var flingSeed: MotionEvent? = null
-    private var flingMode = FlingMode.History
-
-    private enum class FlingMode { History, Mouse, Arrows }
 
     private fun startFling(event: MotionEvent, velocityY: Float) {
         abortFling()
@@ -211,10 +230,7 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
         flingSeed?.recycle()
         flingSeed = MotionEvent.obtain(event)
         val vy = velocityY.coerceIn(-maxFling.toFloat(), maxFling.toFloat())
-        // OverScroller Y-axis here is measured in terminal ROWS, so convert the
-        // px/s finger velocity to rows/s — otherwise a normal flick reads as
-        // thousands of rows/s and slams into the top/bottom bound.
-        val rowsPerSecond = (vy / spacing).roundToInt()
+
         flingMode = when {
             emu.isMouseTrackingActive -> FlingMode.Mouse
             emu.isAlternateBufferActive -> FlingMode.Arrows
@@ -222,11 +238,21 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
         }
         when (flingMode) {
             FlingMode.History -> {
-                val min = -emu.screen.activeTranscriptRows
-                scroller.fling(0, terminal.topRow, 0, rowsPerSecond, 0, 0, min, 0)
-                flingLastY = terminal.topRow
+                val maxScroll = maxTranscriptScroll()
+                // Fling operates directly in pixels for smooth deceleration
+                scroller.fling(
+                    0,
+                    scrollOffsetY.roundToInt(),
+                    0,
+                    (-vy).roundToInt(),
+                    0,
+                    0,
+                    0,
+                    maxScroll.roundToInt()
+                )
             }
             FlingMode.Mouse, FlingMode.Arrows -> {
+                val rowsPerSecond = (vy / spacing).roundToInt()
                 val cap = emu.mRows * 4
                 scroller.fling(0, 0, 0, rowsPerSecond, 0, 0, -cap, cap)
                 flingLastY = 0
@@ -236,12 +262,35 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
     }
 
     private fun applyScroll(event: MotionEvent, distanceY: Float) {
+        val emu = terminal.mEmulator ?: return
         val spacing = lineSpacing()
         if (spacing <= 0f) return
-        val total = distanceY + remainder
-        val rows = (total / spacing).toInt()
-        remainder = total - rows * spacing
-        if (rows != 0) applyRows(event, rows)
+
+        val isTui = emu.isMouseTrackingActive || emu.isAlternateBufferActive
+        if (isTui) {
+            val total = distanceY + remainder
+            val rows = (total / spacing).toInt()
+            remainder = total - rows * spacing
+            if (rows != 0) applyRows(event, rows)
+        } else {
+            // Dragging down (distanceY < 0) scrolls up into history (scrollOffsetY increases).
+            // Dragging up (distanceY > 0) scrolls down towards live prompt (scrollOffsetY decreases).
+            val maxScroll = maxTranscriptScroll()
+            scrollOffsetY = (scrollOffsetY - distanceY).coerceIn(0f, maxScroll)
+            applySmoothScrollOffset(scrollOffsetY, spacing)
+        }
+    }
+
+    private fun applySmoothScrollOffset(offsetY: Float, spacing: Float) {
+        if (spacing <= 0f) return
+        if (offsetY <= 0.001f) {
+            terminal.setSmoothScroll(0, 0f)
+            return
+        }
+        val exactRows = offsetY / spacing
+        val rowCount = exactRows.toInt()
+        val subOffset = offsetY - rowCount * spacing
+        terminal.setSmoothScroll(-rowCount, subOffset)
     }
 
     private fun applyRows(event: MotionEvent?, rowsDown: Int) {
@@ -270,20 +319,25 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
             }
             emu.isAlternateBufferActive -> {
                 val session = tv.mTermSession ?: return
-                // One arrow per row keeps TUI scrolling proportional to the
-                // finger; page-up/down bursts made fast drags jump whole pages.
                 val seq = if (up) "\u001b[A" else "\u001b[B"
                 repeat(amount) { session.write(seq) }
             }
             else -> {
-                val min = -emu.screen.activeTranscriptRows
-                tv.topRow = (tv.topRow + rowsDown).coerceIn(min, 0)
-                tv.invalidate()
+                val spacing = lineSpacing()
+                scrollOffsetY = (scrollOffsetY + rowsDown * spacing).coerceIn(0f, maxTranscriptScroll())
+                applySmoothScrollOffset(scrollOffsetY, spacing)
             }
         }
     }
 
+    private fun maxTranscriptScroll(): Float {
+        val spacing = lineSpacing()
+        return terminal.activeTranscriptRows() * spacing
+    }
+
     private fun lineSpacing(): Float {
+        val s = terminal.lineSpacing()
+        if (s > 0f) return s
         val emu = terminal.mEmulator ?: return 0f
         val rows = emu.mRows.coerceAtLeast(1)
         val h = terminal.height
