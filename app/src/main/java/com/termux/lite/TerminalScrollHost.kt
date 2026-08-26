@@ -104,6 +104,12 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (AppState.drawerOpen) {
+            if (ev.actionMasked == MotionEvent.ACTION_UP) {
+                AppState.pendingDrawerClose = true
+            }
+            return true
+        }
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 maybeTap = true

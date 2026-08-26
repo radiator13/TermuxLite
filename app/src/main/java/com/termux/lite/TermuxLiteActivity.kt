@@ -561,6 +561,10 @@ private class LiteViewClient(
     }
 
     override fun onSingleTapUp(e: MotionEvent) {
+        if (AppState.drawerOpen) {
+            AppState.pendingDrawerClose = true
+            return
+        }
         val url = UrlAtTap.find(tv, e)
         android.util.Log.i("TermuxLite", "tap(view-client): url=$url")
         if (url != null) {
@@ -575,7 +579,7 @@ private class LiteViewClient(
     override fun shouldBackButtonBeMappedToEscape() = false
     override fun shouldEnforceCharBasedInput() = false
     override fun shouldUseCtrlSpaceWorkaround() = false
-    override fun isTerminalViewSelected() = !AppState.settingsOpen
+    override fun isTerminalViewSelected() = !AppState.settingsOpen && !AppState.drawerOpen
     override fun copyModeChanged(copyMode: Boolean) {}
     override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean {
         if (!session.isRunning && (keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER || keyCode == KeyEvent.KEYCODE_DPAD_CENTER)) {
@@ -632,7 +636,8 @@ fun TermuxLiteApp(
     val view = LocalView.current
 
     LaunchedEffect(drawerState) {
-        snapshotFlow { drawerState.isOpen }.collect { AppState.drawerOpen = it }
+        snapshotFlow { drawerState.isOpen || drawerState.targetValue == DrawerValue.Open }
+            .collect { AppState.drawerOpen = it }
     }
 
     SideEffect {
