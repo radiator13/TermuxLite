@@ -16,6 +16,21 @@ object UrlAtTap {
         """(?i)\b((?:github|gitlab|bitbucket)\.com/[^\s<>"'\]\}>]+|(?:x|twitter)\.com/[^\s<>"'\]\}>]+)"""
     )
 
+    // Bare domains worth linking WITHOUT a scheme (google.com, example.io/x).
+    // Deliberately excludes extension-looking TLDs (.sh .py .rs .md .txt .apk)
+    // so terminal filenames never turn into links.
+    private val BARE_TLDS = setOf(
+        "com", "org", "net", "edu", "gov", "mil", "int", "io", "ai", "app", "dev",
+        "co", "me", "xyz", "info", "online", "site", "live", "club", "shop", "blog",
+        "news", "cloud", "page", "tv", "cc", "gg", "fm", "is", "so", "to",
+        "de", "fr", "uk", "us", "in", "ru", "jp", "cn", "kr", "br", "au", "ca",
+        "nl", "se", "no", "es", "it", "pl", "ch", "at", "be", "dk", "fi", "pt",
+        "cz", "eu", "nz", "za", "mx", "id", "th", "tr"
+    )
+    private val BARE_DOMAIN = Regex(
+        """(?i)\b(((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:/[^\s<>"'\]\}>]*)?)"""
+    )
+
     // Mirrors scanner.rs normalize_url: only these bare domains gain https://.
     private val HOSTED_PREFIXES = listOf(
         "github.com/",
@@ -150,6 +165,7 @@ object UrlAtTap {
         SCHEME.findAll(line).forEach { add(it.groups[1]!!.range, it.groupValues[1]) }
         WWW.findAll(line).forEach { add(it.groups[1]!!.range, it.groupValues[1]) }
         HOSTED.findAll(line).forEach { add(it.groups[1]!!.range, it.groupValues[1]) }
+        BARE_DOMAIN.findAll(line).forEach { add(it.groups[1]!!.range, it.groupValues[1]) }
         hits.sortBy { it.start }
         return hits
     }
@@ -173,10 +189,18 @@ object UrlAtTap {
             token.startsWith("www.", ignoreCase = true) -> "https://$token"
             token.contains("://") -> token
             HOSTED_PREFIXES.any { token.startsWith(it, ignoreCase = true) } -> "https://$token"
+            isBareDomain(token) -> "https://$token"
             else -> return null
         }
         if (url.startsWith("http", ignoreCase = true) && url.length < 10) return null
         return url
+    }
+
+    /** True when the token's last host label (before any path) is a linkable TLD. */
+    private fun isBareDomain(token: String): Boolean {
+        val host = token.substringBefore('/').lowercase()
+        if (!host.contains('.')) return false
+        return host.substringAfterLast('.') in BARE_TLDS
     }
 
     internal fun utf8ByteOffsetOfCharIndex(line: String, charIndex: Int): Int {

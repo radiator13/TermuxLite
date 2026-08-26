@@ -56,6 +56,21 @@ class UrlAtTapTest {
     }
 
     @Test
+    fun bareDomainsOpenWithoutScheme() {
+        assertEquals("https://google.com", UrlAtTap.urlAt("search on google.com now", 10))
+        assertEquals("https://example.io/docs?q=1", UrlAtTap.urlAt("see example.io/docs?q=1 today", 6))
+        assertEquals("https://Google.COM", UrlAtTap.urlAt("visit Google.COM.", 8))
+    }
+
+    @Test
+    fun bareDomainRejectsFilenamesVersionsAndWords() {
+        assertNull(UrlAtTap.urlAt("bash agy-install.sh next", 7))
+        assertNull(UrlAtTap.urlAt("read notes.txt here", 7))
+        assertNull(UrlAtTap.urlAt("released v1.2.6 today", 11))
+        assertNull(UrlAtTap.urlAt("e.g something", 2))
+    }
+
+    @Test
     fun singleUrlOnLineOpensFromAnywhere() {
         val line = "  https://example.com/agent-pr  "
         assertEquals("https://example.com/agent-pr", UrlAtTap.urlAt(line, 0))
