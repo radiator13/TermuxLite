@@ -2,4 +2,7 @@
 <resources>
     <string name="app_name">TermuxLite</string>
     <string name="shared_user_label">Termux user</string>
+    <string name="paste_text">Paste</string>
+    <string name="copy_text">Copy</string>
+    <string name="text_selection_more">More…</string>
 </resources>
