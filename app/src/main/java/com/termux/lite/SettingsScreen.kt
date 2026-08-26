@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -34,10 +35,12 @@ import androidx.compose.ui.unit.sp
 fun SettingsScreen(
     theme: TerminalTheme,
     fontSize: Int,
+    fontId: String,
     extraKeys: Boolean,
     keepScreenOn: Boolean,
     onTheme: (TerminalTheme) -> Unit,
     onFontSize: (Int) -> Unit,
+    onFont: (TerminalFont) -> Unit,
     onExtraKeys: (Boolean) -> Unit,
     onKeepScreenOn: (Boolean) -> Unit,
     onClose: () -> Unit,
@@ -83,6 +86,9 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
             SectionTitle(theme, "Terminal")
+            LabeledValue(theme, "Font", TermFonts.byId(fontId).label)
+            FontGrid(theme = theme, currentId = fontId, onFont = onFont)
+            Spacer(modifier = Modifier.height(12.dp))
             LabeledValue(theme, "Font size", "${fontSize}sp")
             ThemedSlider(
                 theme = theme,
@@ -154,6 +160,63 @@ private fun LabeledValue(theme: TerminalTheme, label: String, value: String) {
     ) {
         Text(label, color = theme.fgColor, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
         Text(value, color = theme.fgColor.copy(alpha = 0.85f), fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+    }
+}
+
+@Composable
+private fun FontGrid(
+    theme: TerminalTheme,
+    currentId: String,
+    onFont: (TerminalFont) -> Unit
+) {
+    val context = LocalContext.current
+    val rows = TermFonts.all.chunked(2)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        rows.forEach { pair ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                pair.forEach { item ->
+                    val selected = item.id == currentId
+                    val family = FontFamily(
+                        typeface = TermFonts.typeface(context, item.id)
+                    )
+                    val shape = RoundedCornerShape(6.dp)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(shape)
+                            .background(theme.keyColor)
+                            .border(
+                                width = if (selected) 2.dp else 1.dp,
+                                color = if (selected) theme.accentColor else theme.fgColor.copy(alpha = 0.35f),
+                                shape = shape
+                            )
+                            .clickable { onFont(item) }
+                            .padding(10.dp)
+                    ) {
+                        Text(
+                            text = item.label,
+                            color = theme.fgColor,
+                            fontSize = 12.sp,
+                            fontFamily = family,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = item.sample,
+                            color = theme.fgColor.copy(alpha = 0.8f),
+                            fontSize = 12.sp,
+                            fontFamily = family,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+                if (pair.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
     }
 }
 

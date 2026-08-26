@@ -6,10 +6,9 @@ import com.termux.view.TerminalView
 data class UrlHit(val start: Int, val end: Int, val url: String)
 
 object UrlAtTap {
-    private val MARKDOWN = Regex("""\[([^\]]+)\]\((https?://[^\s)]+)\)""")
     private val ANGLE = Regex("""<(https?://[^>\s]+)>""")
     private val SCHEME = Regex(
-        """(?i)\b((?:https?|ftp|ftps|file)://[^\s<>"'\]\}>]+|mailto:[^\s<>"'\]\}>]+)"""
+        """(?i)\b((?:[a-z][a-z0-9+.-]{1,31})://[^\s<>"'\]\}>]+|mailto:[^\s<>"'\]\}>]+|magnet:\?[^\s<>"'\]\}>]+)"""
     )
     private val WWW = Regex("""(?i)\b(www\.[^\s<>"'\]\}>]+)""")
     private val HOSTED = Regex(
@@ -42,7 +41,7 @@ object UrlAtTap {
 
     /** A URL cut off at end-of-line looks like an unfinished scheme URL. */
     private val CUT_OFF_URL = Regex(
-        """(?i)(?:https?|ftps?|file)://\S+$|www\.\S+$|(?:github|gitlab|bitbucket)\.com/\S+$|(?:x|twitter)\.com/\S+$"""
+        """(?i)(?:[a-z][a-z0-9+.-]{1,31})://\S+$|www\.\S+$|(?:github|gitlab|bitbucket)\.com/\S+$|(?:x|twitter)\.com/\S+$|\]\(\S*$"""
     )
     private const val URL_CONTINUATION_CHARS =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~:/?#[]@!\$&'()*+,;%=-"
@@ -92,13 +91,17 @@ object UrlAtTap {
         var line = segments.joinToString("")
         val tappedSegment = segments.getOrNull(row - y1) ?: return null
 
+        val indexInTapped = col.coerceIn(0, tappedSegment.length.coerceAtLeast(0))
+        var index = baseIndex + indexInTapped
+
         // Hard-wrapped output (explicit '\n' instead of LineWrap) splits URLs
-        // across rows; heal by absorbing continuation rows while the tail of
-        // the line still looks like an unfinished URL.
+        // across rows; heal both directions so tapping a tweet-id tail still
+        // opens the full status URL, and so `[label](` + next-row href works.
+        val healedBack = healHardWrappedBackward(line, prevRow = { i -> rowText(y1 - 1 - i) })
+        line = healedBack.first
+        index += healedBack.second
         line = healHardWrapped(line, nextRow = { i -> rowText(y2 + 1 + i)?.trimStart() })
 
-        val indexInTapped = col.coerceIn(0, tappedSegment.length.coerceAtLeast(0))
-        val index = baseIndex + indexInTapped
         return urlAt(line, index)
     }
 
@@ -106,46 +109,126 @@ object UrlAtTap {
      * If the line ends with what looks like a truncated URL, append following
      * rows (up to [maxRows]) while they continue it. Returns the healed line.
      */
-    internal fun healHardWrapped(line: String, nextRow: (Int) -> String?, maxRows: Int = 4): String {
+    internal fun healHardWrapped(line: String, nextRow: (Int) -> String?, maxRows: Int = 8): String {
         var current = line
         repeat(maxRows) {
-            val hits = findUrls(current)
-            val tail = hits.lastOrNull()
-            val candidate = tail?.takeIf { h ->
-                h.end >= current.length - 1 &&
-                    CUT_OFF_URL.containsMatchIn(h.url) &&
-                    (h.url.last().isLetterOrDigit() || h.url.last() == '/')
-            } ?: return current
+            val tail = current.substringAfterLast(' ')
+            if (!needsForwardHeal(tail, current)) return current
             val continuation = nextRow(it)?.trimStart() ?: return current
             val token = continuation.substringBefore(' ').trimEnd()
-            if (!isUrlContinuation(token, candidate.url)) return current
+            if (!isUrlContinuation(token, tail)) return current
             current += token
         }
         return current
     }
 
-    private fun isUrlContinuation(token: String, previousUrl: String): Boolean {
+    /**
+     * Prepend previous hard-wrapped rows when the tap landed on a URL tail
+     * (tweet id digits, hyphenated path, markdown href). Returns healed line
+     * and how many characters were prepended (for tap-index adjustment).
+     */
+    internal fun healHardWrappedBackward(
+        line: String,
+        prevRow: (Int) -> String?,
+        maxRows: Int = 8
+    ): Pair<String, Int> {
+        var current = line
+        var prepended = 0
+        repeat(maxRows) {
+            val head = current.substringBefore(' ')
+            val prev = prevRow(it) ?: return current to prepended
+            val prevTail = prev.substringAfterLast(' ')
+            if (!canJoinBackward(head, prevTail)) return current to prepended
+            current = prev + current
+            prepended += prev.length
+        }
+        return current to prepended
+    }
+
+    private fun needsForwardHeal(tail: String, full: String): Boolean {
+        if (tail.isEmpty()) return false
+        val last = tail.last()
+        if (full.endsWith("](") || tail.endsWith("](")) return true
+        if (unclosedMarkdown(full)) return true
+        return CUT_OFF_URL.containsMatchIn(tail) &&
+            (last.isLetterOrDigit() || last in "/-_?&=%#@(")
+    }
+
+    private fun unclosedMarkdown(s: String): Boolean {
+        val open = s.lastIndexOf("](")
+        if (open < 0) return false
+        return s.indexOf(')', open + 2) < 0
+    }
+
+    private fun canJoinBackward(head: String, prevTail: String): Boolean {
+        if (head.isEmpty() || prevTail.isEmpty()) return false
+        if (isUrlContinuation(head, prevTail)) return true
+        if (!looksLikeMidUrlFragment(head)) return false
+        return looksLikeTruncatedUrl(prevTail) ||
+            looksLikeMidUrlFragment(prevTail) ||
+            prevTail.endsWith("](") ||
+            prevTail.contains("](")
+    }
+
+    private fun looksLikeTruncatedUrl(token: String): Boolean {
+        if (token.endsWith("](") || token.contains("](")) return true
         if (token.isEmpty()) return false
-        if (token.contains("://")) return false
-        if (token.startsWith("www.", true)) return false
-        if (!token[0].isLetterOrDigit()) return false
+        val last = token.last()
+        return CUT_OFF_URL.containsMatchIn(token) &&
+            (last.isLetterOrDigit() || last in "/-_?&=%#@(")
+    }
+
+    private fun looksLikeMidUrlFragment(token: String): Boolean {
+        if (token.isEmpty()) return false
+        if (!token.all { it in URL_CONTINUATION_CHARS }) return false
+        if (token.contains("://") || token.startsWith("www.", true)) return true
+        val c = token[0]
+        if (c in "/-?&#%") return true
+        if (token.contains('/')) return true
+        if (c.isDigit() && token.takeWhile { it.isDigit() }.length >= 3) return true
+        if (token.contains('-') && token.any { it.isLetter() }) return true
+        return false
+    }
+
+    private fun isUrlContinuation(token: String, previousUrl: String): Boolean {
+        if (token.isEmpty() || previousUrl.isEmpty()) return false
         if (token.endsWith(".")) return false
         if (!token.all { it in URL_CONTINUATION_CHARS }) return false
-        // Only join when it plausibly continues a path: either the URL so far
-        // ends at a directory boundary ('/') or the fragment itself carries one.
-        return previousUrl.endsWith("/") || token.contains('/')
+        val completingMarkdown = previousUrl.endsWith("](") || previousUrl.endsWith("(")
+        if (token.contains("://") || token.startsWith("www.", true)) return completingMarkdown
+        val prevIsUrl = previousUrl.contains("://") ||
+            previousUrl.startsWith("www.", true) ||
+            HOSTED_PREFIXES.any { previousUrl.contains(it, true) } ||
+            completingMarkdown
+        if (!prevIsUrl) return false
+        val last = previousUrl.last()
+        if (last in "/-_?&=%#@+(") {
+            return token[0].isLetterOrDigit() || token[0] in "-._~/%#?&=("
+        }
+        if (token[0] in "/-?&#%") return true
+        if (token.any { it in "/?&=%#@" }) return true
+        val digitRun = previousUrl.takeLastWhile { it.isDigit() }.length
+        if (digitRun >= 4 && token[0].isDigit()) return true
+        return false
     }
 
     internal fun urlAt(line: String, col: Int): String? {
         if (line.isEmpty()) return null
-        // The native scanner indexes spans in UTF-8 bytes; col is char-based.
-        val nativeHit = NativeBridge.findUrlAt(line, utf8ByteOffsetOfCharIndex(line, col))
-        if (nativeHit != null) return nativeHit
-
-        val hits = findUrls(line)
-        if (hits.isEmpty()) return null
         val i = col.coerceIn(0, line.lastIndex)
+        val hits = findUrls(line)
         hits.firstOrNull { i in it.start until it.end }?.let { return it.url }
+
+        // Native scanner is a fallback only. Kotlin hits include markdown
+        // labels and wrap-healed tweet ids that the native path can truncate.
+        val nativeHit = NativeBridge.findUrlAt(line, utf8ByteOffsetOfCharIndex(line, i))
+        if (nativeHit != null) {
+            hits.map { it.url }
+                .filter { it.startsWith(nativeHit) || nativeHit.startsWith(it) }
+                .maxByOrNull { it.length }
+                ?.let { return if (it.length >= nativeHit.length) it else nativeHit }
+            return nativeHit
+        }
+        if (hits.isEmpty()) return null
         val nearby = hits.minBy { dist(i, it) }
         if (dist(i, nearby) <= 3) return nearby.url
         return hits.singleOrNull()?.url
@@ -153,30 +236,93 @@ object UrlAtTap {
 
     internal fun findUrls(line: String): List<UrlHit> {
         val hits = ArrayList<UrlHit>()
-        fun add(range: IntRange, raw: String) {
+        fun add(start: Int, end: Int, raw: String) {
             val url = normalize(raw) ?: return
-            val start = range.first
-            val end = range.last + 1
+            if (start >= end) return
             if (hits.any { start < it.end && end > it.start && it.url == url }) return
             hits.add(UrlHit(start, end, url))
         }
-        MARKDOWN.findAll(line).forEach { add(it.range, it.groupValues[2]) }
-        ANGLE.findAll(line).forEach { add(it.range, it.groupValues[1]) }
-        SCHEME.findAll(line).forEach { add(it.groups[1]!!.range, it.groupValues[1]) }
-        WWW.findAll(line).forEach { add(it.groups[1]!!.range, it.groupValues[1]) }
-        HOSTED.findAll(line).forEach { add(it.groups[1]!!.range, it.groupValues[1]) }
-        BARE_DOMAIN.findAll(line).forEach { add(it.groups[1]!!.range, it.groupValues[1]) }
+
+        scanMarkdown(line, ::add)
+        ANGLE.findAll(line).forEach { add(it.range.first, it.range.last + 1, it.groupValues[1]) }
+        SCHEME.findAll(line).forEach { m ->
+            val range = m.groups[1]!!.range
+            val start = labelStartBeforeParen(line, range.first)
+            add(start, range.last + 1, m.groupValues[1])
+        }
+        WWW.findAll(line).forEach { add(it.groups[1]!!.range.first, it.groups[1]!!.range.last + 1, it.groupValues[1]) }
+        HOSTED.findAll(line).forEach { add(it.groups[1]!!.range.first, it.groups[1]!!.range.last + 1, it.groupValues[1]) }
+        BARE_DOMAIN.findAll(line).forEach { add(it.groups[1]!!.range.first, it.groups[1]!!.range.last + 1, it.groupValues[1]) }
         hits.sortBy { it.start }
         return hits
     }
 
+    /**
+     * `[label](url)` including unclosed hrefs and balanced parens in the URL
+     * (`wiki/Foo_(bar)`). The hit covers the label so tapping the visible text
+     * opens the href behind it.
+     */
+    private fun scanMarkdown(line: String, add: (Int, Int, String) -> Unit) {
+        var i = 0
+        while (i < line.length) {
+            val lb = line.indexOf('[', i)
+            if (lb < 0) break
+            val rb = line.indexOf(']', lb + 1)
+            if (rb < 0 || rb + 1 >= line.length || line[rb + 1] != '(') {
+                i = if (lb + 1 > i) lb + 1 else i + 1
+                continue
+            }
+            val urlStart = rb + 2
+            var depth = 1
+            var k = urlStart
+            while (k < line.length && depth > 0) {
+                when (line[k]) {
+                    '(' -> depth++
+                    ')' -> depth--
+                }
+                if (depth == 0) break
+                k++
+            }
+            val urlEnd = if (depth == 0) k else line.length
+            val raw = line.substring(urlStart, urlEnd).trim().substringBefore(' ')
+            val hitEnd = if (depth == 0) k + 1 else (urlStart + raw.length).coerceAtMost(urlEnd)
+            add(lb, hitEnd, raw)
+            i = hitEnd.coerceAtLeast(lb + 1)
+        }
+    }
+
+    /**
+     * For `The Tribune (https://…)` extend the hit over the adjacent label so
+     * tapping the text in front of a parenthesized URL still opens it.
+     */
+    private fun labelStartBeforeParen(line: String, urlStart: Int): Int {
+        var s = urlStart
+        if (s > 0 && line[s] != '(' && line[s - 1] == '(') s--
+        if (s <= 0 || line[s] != '(') return urlStart
+        var i = s - 1
+        while (i >= 0 && line[i] == ' ') i--
+        if (i < 0) return urlStart
+        // `[label](url)` is handled by scanMarkdown.
+        if (line[i] == ']') return urlStart
+        val labelEnd = i + 1
+        while (i >= 0 && line[i] !in "\t()[]{}<>\"'") {
+            if (line[i] == '.' && (i + 1 >= line.length || line[i + 1] == ' ')) break
+            i--
+        }
+        val start = i + 1
+        val label = line.substring(start, labelEnd).trim()
+        return if (label.length in 2..80) start else urlStart
+    }
+
     internal fun normalize(raw: String): String? {
         var token = raw.trim()
-        while (token.isNotEmpty() && token.last() in ".,;:!?)]}>\"'") {
-            token = token.dropLast(1)
-        }
         while (token.isNotEmpty() && token.first() in "([{\"'<") {
             token = token.drop(1)
+        }
+        while (token.isNotEmpty() && token.last() in ".,;:!?)]}>\"'") {
+            val last = token.last()
+            if (last == ')' && token.count { it == '(' } > token.dropLast(1).count { it == ')' }) break
+            token = token.dropLast(1)
         }
         if (token.length < 4) return null
         val url = when {
@@ -186,6 +332,7 @@ object UrlAtTap {
             token.startsWith("ftps://", ignoreCase = true) -> token
             token.startsWith("file://", ignoreCase = true) -> token
             token.startsWith("mailto:", ignoreCase = true) -> token
+            token.startsWith("magnet:", ignoreCase = true) -> token
             token.startsWith("www.", ignoreCase = true) -> "https://$token"
             token.contains("://") -> token
             HOSTED_PREFIXES.any { token.startsWith(it, ignoreCase = true) } -> "https://$token"

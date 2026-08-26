@@ -67,6 +67,7 @@ class TermuxLiteActivity : ComponentActivity() {
     var terminalView: TerminalView? = null
     var service: TermuxLiteService? = null
     var appliedFontSize: Int = -1
+    var appliedFontId: String? = null
     var attachedSession: TerminalSession? = null
     var appliedThemeId: String? = null
     private var lastBackHandledAt = 0L
@@ -265,7 +266,9 @@ class TermuxLiteActivity : ComponentActivity() {
         } catch (_: Exception) {
             return
         }
-        if (parsed.scheme.equals("file", ignoreCase = true)) {
+        val scheme = parsed.scheme ?: return
+        if (scheme.equals("javascript", true) || scheme.equals("data", true)) return
+        if (scheme.equals("file", ignoreCase = true)) {
             sendBroadcast(
                 Intent(Intent.ACTION_VIEW)
                     .setClassName(packageName, "com.termux.app.TermuxOpenReceiver")
@@ -335,6 +338,14 @@ class TermuxLiteActivity : ComponentActivity() {
         textSize = size
         terminalView?.setTextSize(Prefs.textSize)
         appliedFontSize = Prefs.textSize
+    }
+
+    fun setFont(font: TerminalFont) {
+        Prefs.fontId = font.id
+        AppState.fontId = font.id
+        val tv = terminalView ?: return
+        tv.setTypeface(TermFonts.typeface(this, font.id))
+        appliedFontId = font.id
     }
 
     private fun applyKeepScreenOn() {
@@ -715,10 +726,12 @@ fun TermuxLiteApp(
                         SettingsScreen(
                             theme = theme,
                             fontSize = AppState.fontSize,
+                            fontId = AppState.fontId,
                             extraKeys = extraKeys,
                             keepScreenOn = AppState.keepScreenOn,
                             onTheme = { activity.setTheme(it) },
                             onFontSize = { activity.setFontSize(it) },
+                            onFont = { activity.setFont(it) },
                             onExtraKeys = { activity.setExtraKeys(it) },
                             onKeepScreenOn = { activity.setKeepScreenOn(it) },
                             onClose = { AppState.settingsOpen = false },
@@ -745,6 +758,7 @@ fun TerminalScreen() {
     val activity = context as? TermuxLiteActivity ?: return
     val theme = AppState.theme
     val fontSize = AppState.fontSize
+    val fontId = AppState.fontId
 
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -752,7 +766,9 @@ fun TerminalScreen() {
             val host = TerminalScrollHost(ctx)
             val tv = host.terminal
             tv.setTextSize(activity.textSize)
+            tv.setTypeface(TermFonts.typeface(ctx, fontId))
             activity.appliedFontSize = activity.textSize
+            activity.appliedFontId = fontId
             tv.isFocusable = true
             tv.isFocusableInTouchMode = true
             tv.isClickable = true
@@ -774,6 +790,10 @@ fun TerminalScreen() {
             if (activity.appliedFontSize != fontSize) {
                 tv.setTextSize(fontSize)
                 activity.appliedFontSize = fontSize
+            }
+            if (activity.appliedFontId != fontId) {
+                tv.setTypeface(TermFonts.typeface(tv.context, fontId))
+                activity.appliedFontId = fontId
             }
             val current = activity.currentSession()
             if (activity.terminalView !== tv || activity.attachedSession !== current) {

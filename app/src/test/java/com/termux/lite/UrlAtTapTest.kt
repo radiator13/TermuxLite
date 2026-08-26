@@ -138,4 +138,96 @@ class UrlAtTapTest {
         val line = "café https://example.com"
         assertEquals("https://example.com", UrlAtTap.urlAt(line, line.indexOf('h')))
     }
+
+    @Test
+    fun xStatusUrlOpensExactTweet() {
+        val url = "https://x.com/KesariPunjab/status/2082454538771169297"
+        assertEquals(url, UrlAtTap.urlAt(url, 0))
+        assertEquals(url, UrlAtTap.urlAt(url, url.length - 2))
+        assertEquals(
+            "https://x.com/TheAshwani_12/status/2090113724669694247",
+            UrlAtTap.urlAt("x.com/TheAshwani_12/status/2090113724669694247", 0)
+        )
+    }
+
+    @Test
+    fun wrappedTweetIdIsHealedForwardAndBackward() {
+        val head = "open https://x.com/foo/status/20901137246"
+        val tail = "69694247 now"
+        val full = "https://x.com/foo/status/2090113724669694247"
+        val healed = UrlAtTap.healHardWrapped(head, nextRow = { i -> if (i == 0) tail else null })
+        assertEquals(full, UrlAtTap.urlAt(healed, head.length - 2))
+
+        val back = UrlAtTap.healHardWrappedBackward(tail, prevRow = { i -> if (i == 0) head else null })
+        assertEquals(full, UrlAtTap.urlAt(back.first, back.second + 1))
+    }
+
+    @Test
+    fun hyphenatedPathContinuationHeals() {
+        val head = "https://www.tribuneindia.com/news/punjab/2-gangsters-held"
+        val tail = "-for-firing-at-nurpur-bedi-scan-centre-after-extortion-demand-refused/"
+        val healed = UrlAtTap.healHardWrapped(head, nextRow = { i -> if (i == 0) tail else null })
+        assertEquals(
+            "https://www.tribuneindia.com/news/punjab/2-gangsters-held-for-firing-at-nurpur-bedi-scan-centre-after-extortion-demand-refused/",
+            UrlAtTap.urlAt(healed, 8)
+        )
+    }
+
+    @Test
+    fun markdownLabelAndNestedParensOpenHref() {
+        val line = "See ([The Tribune](https://www.tribuneindia.com/news/foo)) now"
+        val label = line.indexOf("Tribune")
+        val href = line.indexOf("https")
+        assertEquals("https://www.tribuneindia.com/news/foo", UrlAtTap.urlAt(line, label))
+        assertEquals("https://www.tribuneindia.com/news/foo", UrlAtTap.urlAt(line, href))
+    }
+
+    @Test
+    fun unclosedMarkdownStillOpensFromLabel() {
+        val line = "See [the docs](https://example.com/docs"
+        assertEquals("https://example.com/docs", UrlAtTap.urlAt(line, line.indexOf("docs")))
+        assertEquals("https://example.com/docs", UrlAtTap.urlAt(line, line.indexOf("https")))
+    }
+
+    @Test
+    fun markdownHrefSplitAcrossRowsHeals() {
+        val head = "See [The Tribune]("
+        val tail = "https://www.tribuneindia.com/news/foo)"
+        val healed = UrlAtTap.healHardWrapped(head, nextRow = { i -> if (i == 0) tail else null })
+        assertEquals("https://www.tribuneindia.com/news/foo", UrlAtTap.urlAt(healed, 6))
+        assertEquals("https://www.tribuneindia.com/news/foo", UrlAtTap.urlAt(healed, healed.indexOf("https")))
+    }
+
+    @Test
+    fun parenUrlOpensFromAdjacentLabel() {
+        val line = "The Tribune (https://example.com/x) extra"
+        assertEquals("https://example.com/x", UrlAtTap.urlAt(line, 0))
+        assertEquals("https://example.com/x", UrlAtTap.urlAt(line, line.indexOf('h')))
+    }
+
+    @Test
+    fun wikiBalancedParensStayInUrl() {
+        val url = "https://en.wikipedia.org/wiki/Foo_(bar)"
+        assertEquals(url, UrlAtTap.urlAt(url, 0))
+        assertEquals(url, UrlAtTap.normalize("$url)."))
+    }
+
+    @Test
+    fun magnetAndCustomSchemes() {
+        assertEquals(
+            "magnet:?xt=urn:btih:abc",
+            UrlAtTap.urlAt("get magnet:?xt=urn:btih:abc now", 5)
+        )
+        assertEquals(
+            "ssh://git@example.com/repo.git",
+            UrlAtTap.urlAt("ssh://git@example.com/repo.git", 0)
+        )
+    }
+
+    @Test
+    fun twoMarkdownLinksTapTheRightLabel() {
+        val line = "[one](https://one.example/a) then [two](https://two.example/b)"
+        assertEquals("https://one.example/a", UrlAtTap.urlAt(line, line.indexOf("one")))
+        assertEquals("https://two.example/b", UrlAtTap.urlAt(line, line.indexOf("two")))
+    }
 }

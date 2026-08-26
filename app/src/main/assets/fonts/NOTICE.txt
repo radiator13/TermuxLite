@@ -1,0 +1,13 @@
+Bundled terminal fonts. All are Regular, no ligatures (JetBrains Mono NL).
+
+- JetBrains Mono NL — JetBrains, SIL OFL 1.1
+  https://github.com/JetBrains/JetBrainsMono
+- Intel One Mono — Intel / Frere-Jones Type, SIL OFL 1.1
+  https://github.com/intel/intel-one-mono
+- Hack — Source Foundry / Bitstream Vera, MIT
+  https://github.com/source-foundry/Hack
+- Inconsolata — The Inconsolata Project Authors, SIL OFL 1.1
+- Fira Mono — Mozilla Foundation / Telefonica S.A., SIL OFL 1.1
+- Source Code Pro — Adobe, SIL OFL 1.1
+- Ubuntu Mono — Canonical Ltd, Ubuntu Font Licence 1.0
+- IBM Plex Mono — IBM Corp, SIL OFL 1.1

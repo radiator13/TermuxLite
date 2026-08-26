@@ -25,6 +25,7 @@ object AppState {
     var extraKeys: Boolean by mutableStateOf(true)
     var keepScreenOn: Boolean by mutableStateOf(false)
     var fontSize: Int by mutableIntStateOf(Prefs.DEFAULT_TEXT_SIZE)
+    var fontId: String by mutableStateOf(TermFonts.DEFAULT_ID)
     var settingsOpen: Boolean by mutableStateOf(false)
     var drawerOpen: Boolean by mutableStateOf(false)
     var pendingDrawerClose: Boolean by mutableStateOf(false)
@@ -44,5 +45,6 @@ object AppState {
         extraKeys = Prefs.extraKeys
         keepScreenOn = Prefs.keepScreenOn
         fontSize = Prefs.textSize
+        fontId = Prefs.fontId
     }
 }

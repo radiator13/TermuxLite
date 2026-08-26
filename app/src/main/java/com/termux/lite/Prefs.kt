@@ -7,6 +7,7 @@ object Prefs {
     const val NAME = "termuxlite"
     const val KEY_TEXT_SIZE = "text_size"
     const val KEY_THEME = "theme_id"
+    const val KEY_FONT = "font_id"
     const val KEY_EXTRA_KEYS = "extra_keys"
     const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
 
@@ -32,6 +33,12 @@ object Prefs {
         get() = sp.getString(KEY_THEME, TermThemes.DEFAULT_ID) ?: TermThemes.DEFAULT_ID
         set(value) {
             sp.edit().putString(KEY_THEME, value).apply()
+        }
+
+    var fontId: String
+        get() = TermFonts.byId(sp.getString(KEY_FONT, TermFonts.DEFAULT_ID)).id
+        set(value) {
+            sp.edit().putString(KEY_FONT, TermFonts.byId(value).id).apply()
         }
 
     var extraKeys: Boolean
