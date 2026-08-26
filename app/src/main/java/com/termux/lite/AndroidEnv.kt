@@ -22,8 +22,6 @@ object AndroidEnv {
         "$ART_APEX/javalib/apache-xml.jar"
     )
 
-    private val DEX2OAT_JARS = CORE_JARS
-
     /** Command-line-only framework jars that are NOT part of BOOTCLASSPATH. */
     private val TOOL_JAR_SKIP = Regex(
         "/(am|wm|bmgr|bu|abx|content|pm|svc|requestsync|uiautomator|monkey|input|settings|incident)\\.jar$"
@@ -46,12 +44,32 @@ object AndroidEnv {
     )
 
     /**
-     * BOOTCLASSPATH: core libs first (order mirrors AOSP init.environ.rc,
-     * ICU4J third), then /system/framework, then every probeable APEX
-     * javalib. LinkedHashSet keeps first occurrence so the explicit core
-     * entries win over duplicates rediscovered under art/i18n APEXes.
+     * Tier 1 - ground truth. Android init exports BOOTCLASSPATH into the
+     * environment of every process it spawns, including this app, and
+     * /proc/self/environ is always readable for our own uid. Reading it
+     * yields the device's exact, current boot classpath with zero
+     * assumptions. Returns null when absent or implausibly short.
      */
-    fun bootClasspath(): String {
+    private fun inheritedVar(name: String): String? = try {
+        File("/proc/self/environ")
+            .readBytes()
+            .toString(Charsets.ISO_8859_1)
+            .split('\u0000')
+            .firstOrNull { it.startsWith("$name=") }
+            ?.substring(name.length + 1)
+            ?.takeIf { it.split(":").size >= 3 && it.all { c -> c.code >= 32 } }
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * Tier 2 - reconstruction. Core libs first (order mirrors AOSP
+     * init.environ.rc, ICU4J third), then /system/framework, then every
+     * probeable APEX javalib. LinkedHashSet keeps first occurrence so the
+     * explicit core entries win over duplicates rediscovered under
+     * art/i18n APEXes.
+     */
+    private fun reconstructedBootClasspath(): String {
         val parts = LinkedHashSet<String>()
         for (j in CORE_JARS) if (File(j).isFile) parts.add(j)
         try {
@@ -73,8 +91,21 @@ object AndroidEnv {
         return parts.joinToString(":")
     }
 
+    /**
+     * Tier 3 - last resort. Even with nothing but the ART core jars,
+     * app_process boots and simple tools like rish work.
+     */
+    private fun coreOnlyBootClasspath(): String =
+        CORE_JARS.filter { File(it).isFile }.joinToString(":")
+
+    fun bootClasspath(): String =
+        inheritedVar("BOOTCLASSPATH")
+            ?: reconstructedBootClasspath().takeIf { it.split(":").size >= 6 }
+            ?: coreOnlyBootClasspath()
+
     private fun dex2oatBootClasspath(): String =
-        DEX2OAT_JARS.filter { File(it).isFile }.joinToString(":")
+        inheritedVar("DEX2OATBOOTCLASSPATH")
+            ?: CORE_JARS.filter { File(it).isFile }.joinToString(":")
 
     /** Extra env entries merged into every new terminal session. */
     fun sessionEnvExtras(): Array<String> = arrayOf(
