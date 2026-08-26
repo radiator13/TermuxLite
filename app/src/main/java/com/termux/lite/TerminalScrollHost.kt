@@ -195,9 +195,15 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
     private fun startFling(event: MotionEvent, velocityY: Float) {
         abortFling()
         val emu = terminal.mEmulator ?: return
+        val spacing = lineSpacing()
+        if (spacing <= 0f) return
         flingSeed?.recycle()
         flingSeed = MotionEvent.obtain(event)
         val vy = velocityY.coerceIn(-maxFling.toFloat(), maxFling.toFloat())
+        // OverScroller Y-axis here is measured in terminal ROWS, so convert the
+        // px/s finger velocity to rows/s — otherwise a normal flick reads as
+        // thousands of rows/s and slams into the top/bottom bound.
+        val rowsPerSecond = (vy / spacing).roundToInt()
         flingMode = when {
             emu.isMouseTrackingActive -> FlingMode.Mouse
             emu.isAlternateBufferActive -> FlingMode.Arrows
@@ -206,12 +212,12 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
         when (flingMode) {
             FlingMode.History -> {
                 val min = -emu.screen.activeTranscriptRows
-                scroller.fling(0, terminal.topRow, 0, vy.roundToInt(), 0, 0, min, 0)
+                scroller.fling(0, terminal.topRow, 0, rowsPerSecond, 0, 0, min, 0)
                 flingLastY = terminal.topRow
             }
             FlingMode.Mouse, FlingMode.Arrows -> {
-                val travel = (abs(vy) / 6f).roundToInt().coerceIn(emu.mRows, emu.mRows * 32)
-                scroller.fling(0, 0, 0, vy.roundToInt(), 0, 0, -travel, travel)
+                val cap = emu.mRows * 4
+                scroller.fling(0, 0, 0, rowsPerSecond, 0, 0, -cap, cap)
                 flingLastY = 0
             }
         }
@@ -253,14 +259,10 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
             }
             emu.isAlternateBufferActive -> {
                 val session = tv.mTermSession ?: return
-                if (amount >= (emu.mRows / 2).coerceAtLeast(8)) {
-                    val pages = (amount / emu.mRows).coerceAtLeast(1)
-                    val seq = if (up) "\u001b[5~" else "\u001b[6~"
-                    repeat(pages) { session.write(seq) }
-                } else {
-                    val seq = if (up) "\u001b[A" else "\u001b[B"
-                    repeat(amount) { session.write(seq) }
-                }
+                // One arrow per row keeps TUI scrolling proportional to the
+                // finger; page-up/down bursts made fast drags jump whole pages.
+                val seq = if (up) "\u001b[A" else "\u001b[B"
+                repeat(amount) { session.write(seq) }
             }
             else -> {
                 val min = -emu.screen.activeTranscriptRows
