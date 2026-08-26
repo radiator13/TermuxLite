@@ -28,7 +28,7 @@ object UrlAtTap {
         "cz", "eu", "nz", "za", "mx", "id", "th", "tr"
     )
     private val BARE_DOMAIN = Regex(
-        """(?i)\b(((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:/[^\s<>"'\]\}>]*)?)"""
+        """(?i)\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:/[^\s<>"'\]\}>]*)?)"""
     )
 
     // Mirrors scanner.rs normalize_url: only these bare domains gain https://.
