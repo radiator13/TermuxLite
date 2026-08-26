@@ -15,8 +15,8 @@ android {
         // WRITE_EXTERNAL_STORAGE still covers /sdcard.
         targetSdk = 28
         // Above Termux 0.118.0 (1020) and TermuxLite 1.1.0 (1021).
-        versionCode = 1029
-        versionName = "1.2.7"
+        versionCode = 1030
+        versionName = "1.2.8"
 
         ndk {
             abiFilters 'arm64-v8a'
