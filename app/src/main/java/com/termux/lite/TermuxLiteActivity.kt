@@ -259,6 +259,7 @@ class TermuxLiteActivity : ComponentActivity() {
 
     fun openUrl(url: String) {
         val trimmed = url.trim()
+        android.util.Log.i("TermuxLite", "openUrl: '$trimmed'")
         val parsed = try {
             Uri.parse(trimmed)
         } catch (_: Exception) {
@@ -274,6 +275,7 @@ class TermuxLiteActivity : ComponentActivity() {
         }
         try {
             startActivity(Intent(Intent.ACTION_VIEW, parsed).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            android.util.Log.i("TermuxLite", "openUrl: launched direct")
         } catch (_: Exception) {
             try {
                 startActivity(
@@ -282,7 +284,9 @@ class TermuxLiteActivity : ComponentActivity() {
                         "Open with"
                     ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
+                android.util.Log.i("TermuxLite", "openUrl: launched chooser")
             } catch (_: Exception) {
+                android.util.Log.i("TermuxLite", "openUrl: FAILED, no handler for $parsed")
             }
         }
     }
@@ -547,6 +551,7 @@ private class LiteViewClient(
 
     override fun onSingleTapUp(e: MotionEvent) {
         val url = UrlAtTap.find(tv, e)
+        android.util.Log.i("TermuxLite", "tap(view-client): url=$url")
         if (url != null) {
             activity.openUrl(url)
             return

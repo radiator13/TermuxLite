@@ -2,6 +2,7 @@ package com.termux.lite
 
 import android.content.Context
 import android.util.AttributeSet
+import android.util.Log
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.ViewConfiguration
@@ -117,6 +118,10 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
             MotionEvent.ACTION_UP -> {
                 if (maybeTap && !intercepting && !terminal.isSelectingText) {
                     val url = UrlAtTap.find(terminal, ev)
+                    Log.i(
+                        "TermuxLite",
+                        "tap(host): url=$url intercepting=$intercepting selecting=${terminal.isSelectingText}"
+                    )
                     if (url != null) {
                         val cancel = MotionEvent.obtain(ev)
                         cancel.action = MotionEvent.ACTION_CANCEL
