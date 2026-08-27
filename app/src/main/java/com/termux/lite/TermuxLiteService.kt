@@ -433,7 +433,6 @@ class TermuxLiteService : Service() {
     }
 
     private fun createChannel() {
-        if (Build.VERSION.SDK_INT < 26) return
         val nm = getSystemService(NotificationManager::class.java)
         val ch = NotificationChannel(
             CHANNEL_ID,
@@ -469,18 +468,12 @@ class TermuxLiteService : Service() {
             Intent(this, TermuxLiteService::class.java).setAction(ACTION_CYCLE),
             pendingFlags()
         )
-        val builder = if (Build.VERSION.SDK_INT >= 26) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
         val text = when (runningCount) {
             0 -> "no running sessions"
             1 -> "1 session running"
             else -> "$runningCount sessions running"
         }
-        return builder
+        return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("TermuxLite")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.stat_notify_more)
@@ -492,13 +485,8 @@ class TermuxLiteService : Service() {
             .build()
     }
 
-    private fun pendingFlags(): Int {
-        return if (Build.VERSION.SDK_INT >= 23) {
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
-    }
+    private fun pendingFlags(): Int =
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 
     private class SessionHolder(
         val id: Int,

@@ -57,17 +57,28 @@ class TerminalScrollHost(context: Context) : FrameLayout(context) {
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        if (terminal.topRow >= 0 && scrollOffsetY <= 0.01f) {
+        abortFling()
+        if (terminal.topRow >= 0 || scrollOffsetY <= 0.01f) {
             scrollOffsetY = 0f
             terminal.resetScroll()
+        } else {
+            val maxScroll = maxTranscriptScroll()
+            scrollOffsetY = scrollOffsetY.coerceIn(0f, maxScroll)
+            applySmoothScrollOffset(scrollOffsetY, lineSpacing())
         }
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
-        if (changed && terminal.topRow >= 0 && scrollOffsetY <= 0.01f) {
-            scrollOffsetY = 0f
-            terminal.resetScroll()
+        if (changed) {
+            if (terminal.topRow >= 0 || scrollOffsetY <= 0.01f) {
+                scrollOffsetY = 0f
+                terminal.resetScroll()
+            } else {
+                val maxScroll = maxTranscriptScroll()
+                scrollOffsetY = scrollOffsetY.coerceIn(0f, maxScroll)
+                applySmoothScrollOffset(scrollOffsetY, lineSpacing())
+            }
         }
     }
 

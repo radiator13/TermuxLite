@@ -41,7 +41,7 @@ object UrlAtTap {
 
     /** A URL cut off at end-of-line looks like an unfinished scheme URL. */
     private val CUT_OFF_URL = Regex(
-        """(?i)(?:[a-z][a-z0-9+.-]{1,31})://\S+$|www\.\S+$|(?:github|gitlab|bitbucket)\.com/\S+$|(?:x|twitter)\.com/\S+$|\]\(\S*$"""
+        """(?i)(?:[a-z][a-z0-9+.-]{1,31})://\S*$|www\.\S*$|(?:github|gitlab|bitbucket)\.com/\S*$|(?:x|twitter)\.com/\S*$|\]\(\S*$"""
     )
     private const val URL_CONTINUATION_CHARS =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~:/?#[]@!\$&'()*+,;%=-"
@@ -124,7 +124,7 @@ object UrlAtTap {
 
     /**
      * Prepend previous hard-wrapped rows when the tap landed on a URL tail
-     * (tweet id digits, hyphenated path, markdown href). Returns healed line
+     * (tweet id digits, hyphenated path, markdown href, domain suffix). Returns healed line
      * and how many characters were prepended (for tap-index adjustment).
      */
     internal fun healHardWrappedBackward(
@@ -135,12 +135,14 @@ object UrlAtTap {
         var current = line
         var prepended = 0
         repeat(maxRows) {
-            val head = current.substringBefore(' ')
+            val head = current.trimStart().substringBefore(' ')
             val prev = prevRow(it) ?: return current to prepended
             val prevTail = prev.substringAfterLast(' ')
             if (!canJoinBackward(head, prevTail)) return current to prepended
-            current = prev + current
-            prepended += prev.length
+            val trimmedHead = current.trimStart()
+            val droppedSpaces = current.length - trimmedHead.length
+            current = prev + trimmedHead
+            prepended += prev.length - droppedSpaces
         }
         return current to prepended
     }
@@ -151,7 +153,7 @@ object UrlAtTap {
         if (full.endsWith("](") || tail.endsWith("](")) return true
         if (unclosedMarkdown(full)) return true
         return CUT_OFF_URL.containsMatchIn(tail) &&
-            (last.isLetterOrDigit() || last in "/-_?&=%#@(")
+            (last.isLetterOrDigit() || last in "/-_?&=%#@+(:;.~,")
     }
 
     private fun unclosedMarkdown(s: String): Boolean {
@@ -175,7 +177,7 @@ object UrlAtTap {
         if (token.isEmpty()) return false
         val last = token.last()
         return CUT_OFF_URL.containsMatchIn(token) &&
-            (last.isLetterOrDigit() || last in "/-_?&=%#@(")
+            (last.isLetterOrDigit() || last in "/-_?&=%#@+(:;.~,")
     }
 
     private fun looksLikeMidUrlFragment(token: String): Boolean {
@@ -183,16 +185,19 @@ object UrlAtTap {
         if (!token.all { it in URL_CONTINUATION_CHARS }) return false
         if (token.contains("://") || token.startsWith("www.", true)) return true
         val c = token[0]
-        if (c in "/-?&#%") return true
+        if (c in "/-?&#%+") return true
         if (token.contains('/')) return true
         if (c.isDigit() && token.takeWhile { it.isDigit() }.length >= 3) return true
         if (token.contains('-') && token.any { it.isLetter() }) return true
+        if (token.contains('.')) return true
+        val domainPrefix = token.substringBefore('/')
+        if (BARE_TLDS.contains(domainPrefix.lowercase())) return true
         return false
     }
 
     private fun isUrlContinuation(token: String, previousUrl: String): Boolean {
         if (token.isEmpty() || previousUrl.isEmpty()) return false
-        if (token.endsWith(".")) return false
+        if (token.endsWith(".") && !token.contains('/') && !token.contains('?')) return false
         if (!token.all { it in URL_CONTINUATION_CHARS }) return false
         val completingMarkdown = previousUrl.endsWith("](") || previousUrl.endsWith("(")
         if (token.contains("://") || token.startsWith("www.", true)) return completingMarkdown
@@ -202,11 +207,11 @@ object UrlAtTap {
             completingMarkdown
         if (!prevIsUrl) return false
         val last = previousUrl.last()
-        if (last in "/-_?&=%#@+(") {
-            return token[0].isLetterOrDigit() || token[0] in "-._~/%#?&=("
+        if (last in "/-_?&=%#@+(:;.~,") {
+            return token[0].isLetterOrDigit() || token[0] in "-._~/%#?&=+("
         }
-        if (token[0] in "/-?&#%") return true
-        if (token.any { it in "/?&=%#@" }) return true
+        if (token[0] in "/-?&#%+") return true
+        if (token.any { it in "/?&=%#@+" }) return true
         val digitRun = previousUrl.takeLastWhile { it.isDigit() }.length
         if (digitRun >= 4 && token[0].isDigit()) return true
         return false

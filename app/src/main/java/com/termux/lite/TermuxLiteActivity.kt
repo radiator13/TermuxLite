@@ -178,6 +178,11 @@ class TermuxLiteActivity : ComponentActivity() {
         }
     }
 
+    override fun onStop() {
+        terminalView?.let { tv -> service?.detachView(tv) }
+        super.onStop()
+    }
+
     override fun onDestroy() {
         service?.onExitRequested = null
         service?.detachView(terminalView)

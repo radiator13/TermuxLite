@@ -230,4 +230,30 @@ class UrlAtTapTest {
         assertEquals("https://one.example/a", UrlAtTap.urlAt(line, line.indexOf("one")))
         assertEquals("https://two.example/b", UrlAtTap.urlAt(line, line.indexOf("two")))
     }
+
+    @Test
+    fun flipkartMultilineUrlWithDotAndIndentationHealsForwardAndBackward() {
+        val head = "Flipkart https://www.flipkart."
+        val tail = "  com/search?q=Omron+HEM-7156"
+        val expected = "https://www.flipkart.com/search?q=Omron+HEM-7156"
+
+        val healedForward = UrlAtTap.healHardWrapped(head, nextRow = { i -> if (i == 0) tail else null })
+        assertEquals(expected, UrlAtTap.urlAt(healedForward, head.indexOf("https")))
+
+        val back = UrlAtTap.healHardWrappedBackward(tail, prevRow = { i -> if (i == 0) head else null })
+        assertEquals(expected, UrlAtTap.urlAt(back.first, back.second + 4))
+    }
+
+    @Test
+    fun multilineQueryParamWithPlusHeals() {
+        val head = "https://www.flipkart.com/search?q=Omron+"
+        val tail = "  HEM-7156"
+        val expected = "https://www.flipkart.com/search?q=Omron+HEM-7156"
+
+        val healedForward = UrlAtTap.healHardWrapped(head, nextRow = { i -> if (i == 0) tail else null })
+        assertEquals(expected, UrlAtTap.urlAt(healedForward, 0))
+
+        val back = UrlAtTap.healHardWrappedBackward(tail, prevRow = { i -> if (i == 0) head else null })
+        assertEquals(expected, UrlAtTap.urlAt(back.first, back.second + 3))
+    }
 }

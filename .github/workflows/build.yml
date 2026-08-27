@@ -33,16 +33,18 @@ jobs:
         run: |
           cargo test --manifest-path app/src/main/rust/Cargo.toml
 
-      - name: Build Rust Native Library
+      - name: Build Native Libraries
         run: |
           NDK_DIR="${ANDROID_NDK_LATEST_HOME:-$(ls -d "$ANDROID_SDK_ROOT"/ndk/* | sort -V | tail -n 1)}"
           TOOLCHAIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          export CC_aarch64_linux_android="$TOOLCHAIN/aarch64-linux-android24-clang"
+          export CC_aarch64_linux_android="$TOOLCHAIN/aarch64-linux-android28-clang"
           export AR_aarch64_linux_android="$TOOLCHAIN/llvm-ar"
-          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN/aarch64-linux-android24-clang"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN/aarch64-linux-android28-clang"
           cargo build --manifest-path app/src/main/rust/Cargo.toml --target aarch64-linux-android --release
           mkdir -p app/src/main/jniLibs/arm64-v8a
           cp app/src/main/rust/target/aarch64-linux-android/release/libtermuxlite_native.so app/src/main/jniLibs/arm64-v8a/
+          "$TOOLCHAIN/aarch64-linux-android28-clang" -shared -fPIC -O3 -Wall -Wextra -Werror app/src/main/jni/termux.c -o app/src/main/jniLibs/arm64-v8a/libtermux.so
+          "$TOOLCHAIN/llvm-strip" app/src/main/jniLibs/arm64-v8a/libtermux.so
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6

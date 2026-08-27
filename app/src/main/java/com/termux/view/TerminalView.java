@@ -492,11 +492,12 @@ public class TerminalView extends View {
                 awakenScrollBars();
             }
             mTopRow = 0;
+            mSubRowOffsetPx = 0f;
         }
 
         mEmulator.clearScrollCounter();
 
-        invalidate();
+        postInvalidateOnAnimation();
         if (mAccessibilityEnabled) setContentDescription(getText());
     }
 
@@ -1002,6 +1003,7 @@ public class TerminalView extends View {
                 mTerminalCursorBlinkerRunnable.setEmulator(mEmulator);
 
             mTopRow = 0;
+            mSubRowOffsetPx = 0f;
             scrollTo(0, 0);
             invalidate();
         }
@@ -1134,8 +1136,6 @@ public class TerminalView extends View {
     }
 
     public AutofillManager getAutoFillManagerService() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return null;
-
         try {
             Context context = getContext();
             if (context == null) return null;
@@ -1147,8 +1147,6 @@ public class TerminalView extends View {
     }
 
     public boolean isAutoFillEnabled() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false;
-
         try {
             AutofillManager autofillManager = getAutoFillManagerService();
             return autofillManager != null && autofillManager.isEnabled();
@@ -1159,19 +1157,14 @@ public class TerminalView extends View {
     }
 
     public synchronized void requestAutoFillUsername() {
-        requestAutoFill(
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? new String[]{View.AUTOFILL_HINT_USERNAME} :
-                null);
+        requestAutoFill(new String[]{View.AUTOFILL_HINT_USERNAME});
     }
 
     public synchronized void requestAutoFillPassword() {
-        requestAutoFill(
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? new String[]{View.AUTOFILL_HINT_PASSWORD} :
-            null);
+        requestAutoFill(new String[]{View.AUTOFILL_HINT_PASSWORD});
     }
 
     public synchronized void requestAutoFill(String[] autoFillHints) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         if (autoFillHints == null || autoFillHints.length < 1) return;
 
         try {
@@ -1192,7 +1185,6 @@ public class TerminalView extends View {
     }
 
     public synchronized void cancelRequestAutoFill() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
         if (mAutoFillType == AUTOFILL_TYPE_NONE) return;
 
         try {
@@ -1504,7 +1496,6 @@ public class TerminalView extends View {
         }
     }
 
-    @RequiresApi(api = Build.VERSION_CODES.M)
     void hideFloatingToolbar() {
         if (getTextSelectionActionMode() != null) {
             removeCallbacks(mShowFloatingToolbar);
@@ -1513,7 +1504,7 @@ public class TerminalView extends View {
     }
 
     public void updateFloatingToolbarVisibility(MotionEvent event) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && getTextSelectionActionMode() != null) {
+        if (getTextSelectionActionMode() != null) {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_MOVE:
                     hideFloatingToolbar();
