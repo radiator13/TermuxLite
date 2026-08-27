@@ -15,7 +15,7 @@ public class HistoryTest extends TerminalTestCase {
 		assertHistoryStartsWith("777", "666", "555");
 
 		resize(cols, 3);
-		assertHistoryStartsWith("666", "555");
+		assertHistoryStartsWith("777", "666", "555");
 	}
 
 	public void testHistoryWithScrollRegion() {

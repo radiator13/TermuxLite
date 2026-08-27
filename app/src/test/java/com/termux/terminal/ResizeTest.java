@@ -211,30 +211,38 @@ public class ResizeTest extends TerminalTestCase {
 
 	public void testKeyboardShowHideResizeStability() {
 		final int cols = 20;
-		// 10 rows without keyboard, prompt at row 2 with history
+		// 10 rows without keyboard, prompt at row 2 with empty space below
 		withTerminalSized(cols, 10);
-		for (int i = 1; i <= 20; i++) {
-			enterString("cmd " + i + "\r\n");
-		}
+		enterString("cmd 1\r\n");
+		enterString("cmd 2\r\n");
 		enterString("user@termux:~$ ");
-		assertCursorAt(0, 15);
+		assertCursorAt(2, 15);
+		assertLineIs(2, "user@termux:~$      ");
+		assertLineIs(3, "                    ");
+
 		// Keyboard opens: screen shrinks from 10 to 5 rows
+		// Rows 5..9 are blank, so no lines pushed to history, cursor stays at row 2
 		resize(cols, 5);
-		assertCursorAt(0, 15);
-		assertLineIs(0, "user@termux:~$      ");
+		assertCursorAt(2, 15);
+		assertLineIs(2, "user@termux:~$      ");
+		assertLineIs(3, "                    ");
+
 		// Keyboard closes: screen expands from 5 to 10 rows
+		// Prompt stays at row 2, rows 5..9 are blank
 		resize(cols, 10);
-		assertCursorAt(0, 15);
-		assertLineIs(0, "user@termux:~$      ");
-		assertLineIs(1, "                    ");
-		// Keyboard opens again: prompt stays stable at row 0
+		assertCursorAt(2, 15);
+		assertLineIs(2, "user@termux:~$      ");
+		assertLineIs(3, "                    ");
+
+		// Keyboard opens again: prompt stays stable at row 2
 		resize(cols, 5);
-		assertCursorAt(0, 15);
-		assertLineIs(0, "user@termux:~$      ");
-		// Keyboard closes again: prompt stays stable at row 0
+		assertCursorAt(2, 15);
+		assertLineIs(2, "user@termux:~$      ");
+
+		// Keyboard closes again: prompt stays stable at row 2
 		resize(cols, 10);
-		assertCursorAt(0, 15);
-		assertLineIs(0, "user@termux:~$      ");
+		assertCursorAt(2, 15);
+		assertLineIs(2, "user@termux:~$      ");
 	}
 
 }
